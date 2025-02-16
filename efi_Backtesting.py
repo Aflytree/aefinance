@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import akshare as ak
+# import arrow
 
 
 class StockAnalyzer:
@@ -769,7 +770,7 @@ def get_dragon_tiger_stocks():
         return []
 
 
-def backtest_strategy(stock_code, days=252):
+def backtest_strategy(stock_code, days=50):
     """
     对单只股票进行回测
     :param stock_code: 股票代码
@@ -791,8 +792,8 @@ def backtest_strategy(stock_code, days=252):
         capital = initial_capital  # 当前资金
         trades = []  # 交易记录
         holding_days = 0  # 持仓天数
-        target_return = 0.03  # 目标收益率
-        stop_loss = -0.02  # 止损线
+        target_return = 0.08  # 目标收益率
+        stop_loss = -0.03  # 止损线
         entry_price = 0  # 买入价格
 
         # 跳过前20天，确保有足够数据计算指标
@@ -1142,11 +1143,11 @@ def print_summary_statistics(all_results):
     print(f"交易次数: {best_return['number_of_trades']}")
 
 def main():
-    stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
-                   '002703', '002673', '600392', '600489', '002261', '002156',
-                   '002264', '603660', '002430', '002861', '002881', '002629']
+    # stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
+    #                '002703', '002673', '600392', '600489', '002261', '002156',
+    #                '002264', '603660', '002430', '002861', '002881', '002629']
     # stock_codes = ['600178', '002629', '002119']
-    # stock_codes = ['002236']
+    stock_codes = ['002506']
     # day_dragons = get_dragon_tiger_stocks()
     # print(day_dragons)
     # print("=== 股票列表 ===")
@@ -1163,13 +1164,49 @@ def main():
     print("\n开始回测买入信号股票...")
     # for code, name in buy_signals:
     # print(f"\n回测股票 {code} {name}")
+    today_trades = []
     for code in stock_codes:
         results = backtest_strategy(code)
         print_backtest_results(results)
         all_results.append(results)
+        for trade in results['trades']:
+            # print(trade['trades'])
+            if trade['type'] == 'buy':
+                today_trade= ""
+                print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
+                      f"价格: {trade['price']:.2f}, "
+                      f"数量: {trade['quantity']}")
+                if(trade['date'].strftime('%Y-%m-%d') == "2025-01-06"):
+                    today_trade += f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " +
+                                    f"价格: {trade['price']:.2f} " +
+                                    f"数量: {trade['quantity']}"
+                    today_trades.append((today_trade))
+            else:
+                print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
+                      f"价格: {trade['price']:.2f}, "
+                      f"数量: {trade['quantity']}, "
+                      f"收益率: {trade.get('return', 0) * 100:.2f}%, "
+                      f"持仓天数: {trade.get('holding_days', 0)}")
+                if (trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
+                    print("sell today")
 
+    print(today_trades)
     # 打印汇总统计
     print_summary_statistics(all_results)
+    # import  pdb;pdb.set_trace()
+    # for trade in all_results['trades']:
+    #     print(trade['trades'])
+    #     if trade['type'] == 'buy':
+    #         print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
+    #               f"价格: {trade['price']:.2f}, "
+    #               f"数量: {trade['quantity']}")
+    #     else:
+    #         print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
+    #               f"价格: {trade['price']:.2f}, "
+    #               f"数量: {trade['quantity']}, "
+    #               f"收益率: {trade.get('return', 0) * 100:.2f}%, "
+    #               f"持仓天数: {trade.get('holding_days', 0)}")
+    # pass
     #
     # # 可视化结果
     # visualize_backtest_results(all_results)213
