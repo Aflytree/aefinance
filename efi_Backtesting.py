@@ -960,16 +960,17 @@ def get_stock_names(stock_codes):
         stock_names = {}
         for code in stock_codes:
             # 使用akshare获取股票信息
+            # import pdb;pdb.set_trace()
+
             try:
-                import pdb;pdb.set_trace()
                 # 根据股票代码前缀判断市场
                 if code.startswith('6'):
                     market = 'sh'
                 else:
                     market = 'sz'
-                stock_info = ak.stock_individual_info_em(symbol=f"{market}{code}")
+                stock_info = ak.stock_individual_info_em(symbol=f"{code}")
                 if not stock_info.empty:
-                    stock_names[code] = stock_info.iloc[0]['value']
+                    stock_names[code] = stock_info.iloc[1]['value']
             except:
                 stock_names[code] = ''
         return stock_names
@@ -1156,23 +1157,21 @@ def get_stock_name(code):
             market = 'sh'
         else:
             market = 'sz'
-        stock_info = ak.stock_individual_info_em(symbol=f"{market}{code}")
+        stock_info = ak.stock_individual_info_em(symbol=f"{code}")
         if not stock_info.empty:
-            stock_name = stock_info.iloc[0]['value']
+            stock_name = stock_info.iloc[1]['value']
     except:
         stock_name = ''
-    import pdb;pdb.set_trace()
-
     return stock_name
 
 def main():
     for i  in range(2):
         # time.sleep(20)
-        # stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
-        #                '002703', '002673', '600392', '600489', '002261', '002156',
-        #                '002264', '603660', '002430', '002861', '002881', '002629']
+        stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
+                       '002703', '002673', '600392', '600489', '002261', '002156',
+                       '002264', '603660', '002430', '002861', '002881', '002629']
         # stock_codes = ['600178', '002629', '002119']
-        stock_codes = ['002506']
+        # stock_codes = ['002506']
         # day_dragons = get_dragon_tiger_stocks()
         # print(day_dragons)
         # print("=== 股票列表 ===")
@@ -1203,8 +1202,7 @@ def main():
                     print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                           f"价格: {trade['price']:.2f}, "
                           f"数量: {trade['quantity']}")
-                    if(trade['date'].strftime('%Y-%m-%d') == "2025-01-06"):
-
+                    if(trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
                         stock_name = get_stock_name(code)
                         today_trade += f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
                                        f"价格: {trade['price']:.2f} "\
@@ -1219,7 +1217,7 @@ def main():
                           f"收益率: {trade.get('return', 0) * 100:.2f}%, "
                           f"持仓天数: {trade.get('holding_days', 0)}")
                     # if (trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
-                    if (trade['date'].strftime('%Y-%m-%d') == "2025-02-06"):
+                    if (trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
                         stock_name = get_stock_name(code)
                         today_trade += f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
                               f"价格: {trade['price']:.2f}, "\
@@ -1240,23 +1238,8 @@ def main():
                     pass
         # 打印汇总统计
         print_summary_statistics(all_results)
-        # import  pdb;pdb.set_trace()
-        # for trade in all_results['trades']:
-        #     print(trade['trades'])
-        #     if trade['type'] == 'buy':
-        #         print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-        #               f"价格: {trade['price']:.2f}, "
-        #               f"数量: {trade['quantity']}")
-        #     else:
-        #         print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-        #               f"价格: {trade['price']:.2f}, "
-        #               f"数量: {trade['quantity']}, "
-        #               f"收益率: {trade.get('return', 0) * 100:.2f}%, "
-        #               f"持仓天数: {trade.get('holding_days', 0)}")
-        # pass
-        #
         # # 可视化结果
-        visualize_backtest_results(all_results)
+        # visualize_backtest_results(all_results)
         # 打印统计摘要
         # print_signal_summary(buy_signals, sell_signals, neutral_signals)
 

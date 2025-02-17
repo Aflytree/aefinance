@@ -619,7 +619,23 @@ class StockAnalyzer:
             advice += "- 当前无明显买卖信号，建议观望\n"
 
         return advice
-
+def get_stock_name(code):
+    """
+    获取股票名称
+    """
+    stock_name = None
+    try:
+        # 根据股票代码前缀判断市场
+        if code.startswith('6'):
+            market = 'sh'
+        else:
+            market = 'sz'
+        stock_info = ak.stock_individual_info_em(symbol=f"{code}")
+        if not stock_info.empty:
+            stock_name = stock_info.iloc[1]['value']
+    except:
+        stock_name = ''
+    return stock_name
 
 def analyze_multiple_stocks(stock_codes):
     """分析多只gp并统计买卖信号"""
@@ -632,7 +648,8 @@ def analyze_multiple_stocks(stock_codes):
         # 一次性获取所有gp信息
         all_stock_info = ef.stock.get_realtime_quotes()
         # 创建gp代码到名称的映射字典
-        stock_names = dict(zip(all_stock_info['gp代码'], all_stock_info['gp名称']))
+        stock_names = dict(zip(all_stock_info['股票代码'], all_stock_info['股票名称']))
+        # import pdb;pdb.set_trace()
     except Exception as e:
         print(f"获取gp信息时出错: {str(e)}")
         # 如果获取失败，创建空字典
@@ -641,7 +658,8 @@ def analyze_multiple_stocks(stock_codes):
     for code in stock_codes:
         try:
             # 获取gp名称，如果找不到则显示'未知'
-            stock_name = stock_names.get(code, '未知')
+            stock_name = get_stock_name(code)
+            # import pdb;pdb.set_trace()
             print(f"\n分析gp {code} - {stock_name}...")
 
             analyzer = StockAnalyzer(code, days=60)
@@ -746,8 +764,8 @@ def get_dragon_tiger_stocks():
         # 提取xx代码和名称并去重
         if not dragon_tiger_data.empty:
             # 根据实际的列名调整
-            stock_info = dragon_tiger_data[['xx代码', 'xx名称']].drop_duplicates()
-            result = list(zip(stock_info['xx代码'], stock_info['xx名称']))
+            stock_info = dragon_tiger_data[['股票代码', '股票名称']].drop_duplicates()
+            result = list(zip(stock_info['股票代码'], stock_info['股票名称']))
 
             # 打印获取到的数据数量
             print(f"\n获取到 {len(result)} 只xxxyy")
@@ -771,12 +789,12 @@ def main():
                    '002703', '002673', '600392', '600489', '002261', '002156',
                    '002264', '603660', '002430', '002861', '002881', '002629']
     # stock_codes = ['002506']
-    day_dragons = get_dragon_tiger_stocks()
-    print(day_dragons)
-    dragons = []
-    for code, name in day_dragons:
-        print(f"{code} - {name}")
-        dragons.append(code)
+    # day_dragons = get_dragon_tiger_stocks()
+    # print(day_dragons)
+    # dragons = []
+    # for code, name in day_dragons:
+    #     print(f"{code} - {name}")
+    #     dragons.append(code)
     # print(dragons)
     # exit()
     # import pdb;pdb.set_trace()
