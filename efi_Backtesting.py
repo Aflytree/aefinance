@@ -735,13 +735,13 @@ def visualize_signals(buy_signals, sell_signals, neutral_signals):
     plt.show()
 
 
-def get_dragon_tiger_stocks():
+def get_dragon_tiger_stocks(date="20250210"):
     """
     获取最新龙虎榜股票
     """
     try:
         # 使用龙虎榜每日明细接口
-        dragon_tiger_data = ak.stock_lhb_detail_daily_sina(date="20250210")
+        dragon_tiger_data = ak.stock_lhb_detail_daily_sina(date=date)
         print(dragon_tiger_data)
         # 打印数据结构信息
         print("\n数据列名:", dragon_tiger_data.columns.tolist())
@@ -772,7 +772,7 @@ def get_dragon_tiger_stocks():
         return []
 
 
-def backtest_strategy(stock_code, days=50):
+def backtest_strategy(stock_code, days=200):
     """
     对单只股票进行回测
     :param stock_code: 股票代码
@@ -789,12 +789,12 @@ def backtest_strategy(stock_code, days=50):
             return None
 
         # 初始化回测参数
-        initial_capital = 100000  # 初始资金10万
+        initial_capital = 1000000  # 初始资金10万
         position = 0  # 持仓数量
         capital = initial_capital  # 当前资金
         trades = []  # 交易记录
         holding_days = 0  # 持仓天数
-        target_return = 0.08  # 目标收益率
+        target_return = 0.11   # 目标收益率
         stop_loss = -0.03  # 止损线
         entry_price = 0  # 买入价格
 
@@ -1164,22 +1164,27 @@ def get_stock_name(code):
         stock_name = ''
     return stock_name
 
-def main():
-    for i  in range(2):
-        # time.sleep(20)
-        stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
-                       '002703', '002673', '600392', '600489', '002261', '002156',
-                       '002264', '603660', '002430', '002861', '002881', '002629']
+def efi_backtesting():
+    for i  in range(42):
+        # stock_codes = ['002506', '600178', '002119', '002122', '002448',
+        #                '002703', '002673', '600392', '600489', '002261',
+        #                '002264', '002861', '002881', '002629',
+        #                '002506', '688041']
+        stock_codes = ['600178', '002119', '002122', '002448',
+                       '002703', '600392', '002156',
+                       '002264', '002861', '002881', '002629',
+                       '688041', '002506', '002594']
         # stock_codes = ['600178', '002629', '002119']
-        # stock_codes = ['002506']
-        # day_dragons = get_dragon_tiger_stocks()
+        # stock_codes = ['002594', '002119', '002861', '603986']
+        # day_dragons = get_dragon_tiger_stocks(date="20250221")
         # print(day_dragons)
         # print("=== 股票列表 ===")
         # dragons = []
+        # stock_codes = []
         # for code, name in day_dragons:
         #     print(f"{code} - {name}")
-        #     dragons.append(code)
-        # print(dragons)
+        #     stock_codes.append(code)
+        # print(stock_codes)
         # exit()
         # import pdb;pdb.set_trace()
         # 分析所有股票
@@ -1193,7 +1198,6 @@ def main():
             results = backtest_strategy(code)
             print_backtest_results(results)
             all_results.append(results)
-            today_trades = []
             for trade in results['trades']:
                 # print(trade['trades'])
                 today_trade = ""
@@ -1202,40 +1206,46 @@ def main():
                     print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                           f"价格: {trade['price']:.2f}, "
                           f"数量: {trade['quantity']}")
-                    if(trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
+                    if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
                         stock_name = get_stock_name(code)
-                        today_trade += f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
-                                       f"价格: {trade['price']:.2f} "\
-                                       f"数量: {trade['quantity']}"\
-                                       f"code: {code}"\
-                                       f"name: {stock_name}"
-                        today_trades.append((today_trade))
+                        today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
+                                       f" 价格: {trade['price']:.2f} "\
+                                       f" 数量: {trade['quantity']}"\
+                                       f" code: {code}"\
+                                       f" name: {stock_name}"
+                        today_trades.append(today_trade)
                 else:
                     print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                           f"价格: {trade['price']:.2f}, "
                           f"数量: {trade['quantity']}, "
                           f"收益率: {trade.get('return', 0) * 100:.2f}%, "
                           f"持仓天数: {trade.get('holding_days', 0)}")
-                    # if (trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
-                    if (trade['date'].strftime('%Y-%m-%d') == datetime.now().date()):
+
+                    if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
                         stock_name = get_stock_name(code)
-                        today_trade += f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
-                              f"价格: {trade['price']:.2f}, "\
-                              f"数量: {trade['quantity']}, "\
-                              f"收益率: {trade.get('return', 0) * 100:.2f}%, "\
-                              f"持仓天数: {trade.get('holding_days', 0)}" \
-                              f"code: {code}"\
-                              f"name: {stock_name}"
-                        today_trades.append((today_trade))
+                        today_trade += f" 卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
+                              f" 价格: {trade['price']:.2f}, "\
+                              f" 数量: {trade['quantity']}, "\
+                              f" 收益率: {trade.get('return', 0) * 100:.2f}%, "\
+                              f" 持仓天数: {trade.get('holding_days', 0)}" \
+                              f" code: {code}"\
+                              f" name: {stock_name}"
+                        today_trades.append(today_trade)
                         print("sell today")
-            print(today_trades)
-            for tra in today_trades:
-                if tra[0:2] == "买入":
-                    efi_email.send(tra)
-                elif tra[0:2] == "卖出":
-                    efi_email.send(tra)
-                else:
-                    pass
+            # print(today_trades)
+            # for tra in today_trades:
+            #     if tra[0:2] == "买入":
+            #         efi_email.send(tra)
+            #     elif tra[0:2] == "卖出":
+            #         efi_email.send(tra)
+            #     else:
+            #         pass
+
+        if len(today_trades) != 0:
+            efi_email.send('\n\n'.join(today_trades))
+
+        time.sleep(600)
+
         # 打印汇总统计
         print_summary_statistics(all_results)
         # # 可视化结果
@@ -1248,4 +1258,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    efi_backtesting()
