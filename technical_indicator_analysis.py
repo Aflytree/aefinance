@@ -1,9 +1,7 @@
 import efinance as ef
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-import akshare as ak
 
 
 class StockAnalyzer:
@@ -14,7 +12,7 @@ class StockAnalyzer:
         self._calculate_indicators()
 
     def _get_data(self):
-        """获取gp数据"""
+        """获取股票数据"""
         df = ef.stock.get_quote_history(self.stock_code)
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
@@ -108,6 +106,10 @@ class StockAnalyzer:
             signal['signal'] = 'buy'
             signal['strength'] = 1
             signal['message'] = 'MACD金叉'
+            if latest_macd > 0:
+                print("macd jin")
+                signal['message_macd'] = 'MACD位于零轴上方'
+                signal['strength'] = 2
         # MACD死叉
         elif latest_macd < latest_signal and prev_macd >= prev_signal:
             signal['signal'] = 'sell'
@@ -288,6 +290,7 @@ class StockAnalyzer:
                 return True
 
         return False
+
     def analyze_trading_signals(self):
         """分析交易信号"""
         signals = pd.DataFrame(index=self.df.index)
@@ -472,16 +475,19 @@ class StockAnalyzer:
         }
 
         # 判断十字星
-        if abs(latest_k['open'] - latest_k['close']) / (latest_k['high'] - latest_k['low']) < 0.1:
-            patterns['candlestick'].append('十字星')
+        if (latest_k['high'] - latest_k['low']) > 0:
+            if abs(latest_k['open'] - latest_k['close']) / (latest_k['high'] - latest_k['low']) < 0.1:
+                patterns['candlestick'].append('十字星')
 
         # 判断长上影线
-        if (latest_k['high'] - max(latest_k['open'], latest_k['close'])) / (latest_k['high'] - latest_k['low']) > 0.6:
-            patterns['candlestick'].append('长上影线')
+        if (latest_k['high'] - latest_k['low']) > 0:
+            if (latest_k['high'] - max(latest_k['open'], latest_k['close'])) / (latest_k['high'] - latest_k['low']) > 0.6:
+                patterns['candlestick'].append('长上影线')
 
         # 判断长下影线
-        if (min(latest_k['open'], latest_k['close']) - latest_k['low']) / (latest_k['high'] - latest_k['low']) > 0.6:
-            patterns['candlestick'].append('长下影线')
+        if (latest_k['high'] - latest_k['low']) > 0:
+            if (min(latest_k['open'], latest_k['close']) - latest_k['low']) / (latest_k['high'] - latest_k['low']) > 0.6:
+                patterns['candlestick'].append('长下影线')
 
         # 2. 识别多日形态
         recent_prices = df['收盘'].tail(20)
@@ -568,6 +574,7 @@ class StockAnalyzer:
         advice += "- 控制仓位风险\n"
 
         return advice
+
     def get_trading_advice2(self):
         """生成交易建议"""
         signals = self.analyze_trading_signals()
@@ -619,193 +626,4 @@ class StockAnalyzer:
             advice += "- 当前无明显买卖信号，建议观望\n"
 
         return advice
-def get_stock_name(code):
-    """
-    获取股票名称
-    """
-    stock_name = None
-    try:
-        # 根据股票代码前缀判断市场
-        if code.startswith('6'):
-            market = 'sh'
-        else:
-            market = 'sz'
-        stock_info = ak.stock_individual_info_em(symbol=f"{code}")
-        if not stock_info.empty:
-            stock_name = stock_info.iloc[1]['value']
-    except:
-        stock_name = ''
-    return stock_name
 
-def analyze_multiple_stocks(stock_codes):
-    """分析多只gp并统计买卖信号"""
-    buy_signals = []
-    sell_signals = []
-    neutral_signals = []
-
-    # 获取gp代码和名称的映射
-    try:
-        # 一次性获取所有gp信息
-        all_stock_info = ef.stock.get_realtime_quotes()
-        # 创建gp代码到名称的映射字典
-        stock_names = dict(zip(all_stock_info['股票代码'], all_stock_info['股票名称']))
-        # import pdb;pdb.set_trace()
-    except Exception as e:
-        print(f"获取gp信息时出错: {str(e)}")
-        # 如果获取失败，创建空字典
-        stock_names = {}
-
-    for code in stock_codes:
-        try:
-            # 获取gp名称，如果找不到则显示'未知'
-            stock_name = get_stock_name(code)
-            # import pdb;pdb.set_trace()
-            print(f"\n分析gp {code} - {stock_name}...")
-
-            analyzer = StockAnalyzer(code, days=60)
-            advice = analyzer.get_trading_advice1()
-
-            # 存储gp代码和名称的元组
-            stock_tuple = (code, stock_name)
-
-            # 解析建议中的信号
-            if "买入信号" in advice:
-                buy_signals.append(stock_tuple)
-            elif "卖出信号" in advice:
-                sell_signals.append(stock_tuple)
-            else:
-                neutral_signals.append(stock_tuple)
-
-            print(advice)
-
-        except Exception as e:
-            print(f"分析gp {code} 时出错: {str(e)}")
-            continue
-
-    return buy_signals, sell_signals, neutral_signals
-
-def print_signal_summary(buy_signals, sell_signals, neutral_signals):
-    """打印信号统计摘要"""
-    total_stocks = len(buy_signals) + len(sell_signals) + len(neutral_signals)
-
-    print("\n=== gp信号统计 ===")
-    print(f"总分析gp数: {total_stocks}")
-
-    print(f"\n买入信号 ({len(buy_signals)}只):")
-    for code, name in buy_signals:
-        print(f"- {code} {name}")
-
-    print(f"\n卖出信号 ({len(sell_signals)}只):")
-    for code, name in sell_signals:
-        print(f"- {code} {name}")
-
-    print(f"\n观望信号 ({len(neutral_signals)}只):")
-    for code, name in neutral_signals:
-        print(f"- {code} {name}")
-
-
-def visualize_signals(buy_signals, sell_signals, neutral_signals):
-    """可视化买卖信号统计"""
-    # 准备数据
-    categories = ['买入信号', '卖出信号', '观望信号']
-    values = [len(buy_signals), len(sell_signals), len(neutral_signals)]
-
-    # 创建图表
-    plt.figure(figsize=(12, 8))
-
-    # 绘制柱状图
-    bars = plt.bar(categories, values)
-
-    # 设置颜色
-    bars[0].set_color('red')
-    bars[1].set_color('green')
-    bars[2].set_color('gray')
-
-    # 添加数值标签
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'{int(height)}',
-                 ha='center', va='bottom')
-
-    # 在柱状图下方添加gp列表
-    plt.figtext(0.1, 0.02, f"买入: {', '.join([f'{code} {name}' for code, name in buy_signals])}",
-                wrap=True, fontsize=8)
-    plt.figtext(0.4, 0.02, f"卖出: {', '.join([f'{code} {name}' for code, name in sell_signals])}",
-                wrap=True, fontsize=8)
-    plt.figtext(0.7, 0.02, f"观望: {', '.join([f'{code} {name}' for code, name in neutral_signals])}",
-                wrap=True, fontsize=8)
-
-    # 设置标题和标签
-    plt.title('gp信号分布')
-    plt.xlabel('信号类型')
-    plt.ylabel('gp数量')
-
-    # 调整布局以适应底部文本
-    plt.subplots_adjust(bottom=0.2)
-
-    # 显示图表
-    plt.show()
-
-
-def get_dragon_tiger_stocks():
-    """
-    获取最新xxxyy
-    """
-    try:
-        # 使用xxx每日明细接口
-        dragon_tiger_data = ak.stock_lhb_detail_daily_sina(date="20250207")
-        print(dragon_tiger_data)
-        # 打印数据结构信息
-        print("\n数据列名:", dragon_tiger_data.columns.tolist())
-        print("\n数据前几行:")
-        print(dragon_tiger_data.head())
-
-        # 提取xx代码和名称并去重
-        if not dragon_tiger_data.empty:
-            # 根据实际的列名调整
-            stock_info = dragon_tiger_data[['股票代码', '股票名称']].drop_duplicates()
-            result = list(zip(stock_info['股票代码'], stock_info['股票名称']))
-
-            # 打印获取到的数据数量
-            print(f"\n获取到 {len(result)} 只xxxyy")
-
-            return result
-        else:
-            print("未获取到xxx数据")
-            return []
-
-    except Exception as e:
-        print(f"获取xxx数据时出错: {str(e)}")
-        # 如果出错，打印所有可用的接口
-        print("\n可用的=xxx相关接口:")
-        for method in dir(ak):
-            if 'lhb' in method.lower():
-                print(f"- {method}")
-        return []
-
-def main():
-    stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
-                   '002703', '002673', '600392', '600489', '002261', '002156',
-                   '002264', '603660', '002430', '002861', '002881', '002629']
-    # stock_codes = ['002506']
-    # day_dragons = get_dragon_tiger_stocks()
-    # print(day_dragons)
-    # dragons = []
-    # for code, name in day_dragons:
-    #     print(f"{code} - {name}")
-    #     dragons.append(code)
-    # print(dragons)
-    # exit()
-    # import pdb;pdb.set_trace()
-    buy_signals, sell_signals, neutral_signals = analyze_multiple_stocks(stock_codes)
-
-    # 打印统计摘要
-    print_signal_summary(buy_signals, sell_signals, neutral_signals)
-
-    # 可视化结果
-    #visualize_signals(buy_signals, sell_signals, neutral_signals)
-
-
-if __name__ == "__main__":
-    main()

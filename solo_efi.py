@@ -4,9 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import akshare as ak
-import efi_email
-import time
-# import arrow
 
 
 class StockAnalyzer:
@@ -17,7 +14,7 @@ class StockAnalyzer:
         self._calculate_indicators()
 
     def _get_data(self):
-        """获取股票数据"""
+        """获取gp数据"""
         df = ef.stock.get_quote_history(self.stock_code)
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
@@ -98,9 +95,9 @@ class StockAnalyzer:
         signal = {
             'signal': None,
             'strength': 0,
-            'message': ''
+            'message': '',
+            'message_macd': '',
         }
-
         latest_macd = self.df['MACD'].iloc[-1]
         latest_signal = self.df['Signal'].iloc[-1]
         prev_macd = self.df['MACD'].iloc[-2]
@@ -108,9 +105,14 @@ class StockAnalyzer:
 
         # MACD金叉
         if latest_macd > latest_signal and prev_macd <= prev_signal:
+            import pdb;pdb.set_trace()
+            self.df.to_excel(f'xxx_xxx.xlsx')
             signal['signal'] = 'buy'
             signal['strength'] = 1
             signal['message'] = 'MACD金叉'
+            if latest_macd > 0:
+                signal['message_macd'] = 'MACD位于零轴上方'
+                signal['strength'] = 3
         # MACD死叉
         elif latest_macd < latest_signal and prev_macd >= prev_signal:
             signal['signal'] = 'sell'
@@ -475,19 +477,16 @@ class StockAnalyzer:
         }
 
         # 判断十字星
-        if (latest_k['high'] - latest_k['low']) > 0:
-            if abs(latest_k['open'] - latest_k['close']) / (latest_k['high'] - latest_k['low']) < 0.1:
-                patterns['candlestick'].append('十字星')
+        if abs(latest_k['open'] - latest_k['close']) / (latest_k['high'] - latest_k['low']) < 0.1:
+            patterns['candlestick'].append('十字星')
 
         # 判断长上影线
-        if (latest_k['high'] - latest_k['low']) > 0:
-            if (latest_k['high'] - max(latest_k['open'], latest_k['close'])) / (latest_k['high'] - latest_k['low']) > 0.6:
-                patterns['candlestick'].append('长上影线')
+        if (latest_k['high'] - max(latest_k['open'], latest_k['close'])) / (latest_k['high'] - latest_k['low']) > 0.6:
+            patterns['candlestick'].append('长上影线')
 
         # 判断长下影线
-        if (latest_k['high'] - latest_k['low']) > 0:
-            if (min(latest_k['open'], latest_k['close']) - latest_k['low']) / (latest_k['high'] - latest_k['low']) > 0.6:
-                patterns['candlestick'].append('长下影线')
+        if (min(latest_k['open'], latest_k['close']) - latest_k['low']) / (latest_k['high'] - latest_k['low']) > 0.6:
+            patterns['candlestick'].append('长下影线')
 
         # 2. 识别多日形态
         recent_prices = df['收盘'].tail(20)
@@ -625,34 +624,53 @@ class StockAnalyzer:
             advice += "- 当前无明显买卖信号，建议观望\n"
 
         return advice
-
+def get_stock_name(code):
+    """
+    获取股票名称
+    """
+    stock_name = None
+    try:
+        # 根据股票代码前缀判断市场
+        if code.startswith('6'):
+            market = 'sh'
+        else:
+            market = 'sz'
+        stock_info = ak.stock_individual_info_em(symbol=f"{code}")
+        if not stock_info.empty:
+            stock_name = stock_info.iloc[1]['value']
+    except:
+        stock_name = ''
+    return stock_name
 
 def analyze_multiple_stocks(stock_codes):
-    """分析多只股票并统计买卖信号"""
+    """分析多只gp并统计买卖信号"""
     buy_signals = []
     sell_signals = []
     neutral_signals = []
 
-    # 获取股票代码和名称的映射
+    # 获取gp代码和名称的映射
     try:
-        # 一次性获取所有股票信息
+        # 一次性获取所有gp信息
         all_stock_info = ef.stock.get_realtime_quotes()
-        # 创建股票代码到名称的映射字典
+        # 创建gp代码到名称的映射字典
         stock_names = dict(zip(all_stock_info['股票代码'], all_stock_info['股票名称']))
+        # import pdb;pdb.set_trace()
     except Exception as e:
-        print(f"获取股票信息时出错: {str(e)}")
+        print(f"获取gp信息时出错: {str(e)}")
         # 如果获取失败，创建空字典
         stock_names = {}
 
     for code in stock_codes:
         try:
-            # 获取股票名称，如果找不到则显示'未知'
-            stock_name = stock_names.get(code, '未知')
-            print(f"\n分析股票 {code} - {stock_name}...")
+            # 获取gp名称，如果找不到则显示'未知'
+            stock_name = get_stock_name(code)
+            # import pdb;pdb.set_trace()
+            print(f"\n分析gp {code} - {stock_name}...")
 
             analyzer = StockAnalyzer(code, days=60)
             advice = analyzer.get_trading_advice1()
-            # 存储股票代码和名称的元组
+
+            # 存储gp代码和名称的元组
             stock_tuple = (code, stock_name)
 
             # 解析建议中的信号
@@ -666,7 +684,7 @@ def analyze_multiple_stocks(stock_codes):
             print(advice)
 
         except Exception as e:
-            print(f"分析股票 {code} 时出错: {str(e)}")
+            print(f"分析gp {code} 时出错: {str(e)}")
             continue
 
     return buy_signals, sell_signals, neutral_signals
@@ -675,8 +693,8 @@ def print_signal_summary(buy_signals, sell_signals, neutral_signals):
     """打印信号统计摘要"""
     total_stocks = len(buy_signals) + len(sell_signals) + len(neutral_signals)
 
-    print("\n=== 股票信号统计 ===")
-    print(f"总分析股票数: {total_stocks}")
+    print("\n=== gp信号统计 ===")
+    print(f"总分析gp数: {total_stocks}")
 
     print(f"\n买入信号 ({len(buy_signals)}只):")
     for code, name in buy_signals:
@@ -715,7 +733,7 @@ def visualize_signals(buy_signals, sell_signals, neutral_signals):
                  f'{int(height)}',
                  ha='center', va='bottom')
 
-    # 在柱状图下方添加股票列表
+    # 在柱状图下方添加gp列表
     plt.figtext(0.1, 0.02, f"买入: {', '.join([f'{code} {name}' for code, name in buy_signals])}",
                 wrap=True, fontsize=8)
     plt.figtext(0.4, 0.02, f"卖出: {', '.join([f'{code} {name}' for code, name in sell_signals])}",
@@ -724,9 +742,9 @@ def visualize_signals(buy_signals, sell_signals, neutral_signals):
                 wrap=True, fontsize=8)
 
     # 设置标题和标签
-    plt.title('股票信号分布')
+    plt.title('gp信号分布')
     plt.xlabel('信号类型')
-    plt.ylabel('股票数量')
+    plt.ylabel('gp数量')
 
     # 调整布局以适应底部文本
     plt.subplots_adjust(bottom=0.2)
@@ -735,527 +753,64 @@ def visualize_signals(buy_signals, sell_signals, neutral_signals):
     plt.show()
 
 
-def get_dragon_tiger_stocks(date="20250210"):
+def get_dragon_tiger_stocks():
     """
-    获取最新龙虎榜股票
+    获取最新xxxyy
     """
     try:
-        # 使用龙虎榜每日明细接口
-        dragon_tiger_data = ak.stock_lhb_detail_daily_sina(date=date)
+        # 使用xxx每日明细接口
+        dragon_tiger_data = ak.stock_lhb_detail_daily_sina(date="20250207")
         print(dragon_tiger_data)
         # 打印数据结构信息
         print("\n数据列名:", dragon_tiger_data.columns.tolist())
         print("\n数据前几行:")
         print(dragon_tiger_data.head())
 
-        # 提取股票代码和名称并去重
+        # 提取xx代码和名称并去重
         if not dragon_tiger_data.empty:
             # 根据实际的列名调整
             stock_info = dragon_tiger_data[['股票代码', '股票名称']].drop_duplicates()
             result = list(zip(stock_info['股票代码'], stock_info['股票名称']))
 
             # 打印获取到的数据数量
-            print(f"\n获取到 {len(result)} 只龙虎榜股票")
+            print(f"\n获取到 {len(result)} 只xxxyy")
 
             return result
         else:
-            print("未获取到龙虎榜数据")
+            print("未获取到xxx数据")
             return []
 
     except Exception as e:
-        print(f"获取龙虎榜数据时出错: {str(e)}")
+        print(f"获取xxx数据时出错: {str(e)}")
         # 如果出错，打印所有可用的接口
-        print("\n可用的龙虎榜相关接口:")
+        print("\n可用的=xxx相关接口:")
         for method in dir(ak):
             if 'lhb' in method.lower():
                 print(f"- {method}")
         return []
 
+def main():
+    stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
+                   '002703', '002673', '600392', '600489', '002261', '002156',
+                   '002264', '603660', '002430', '002861', '002881', '002629']
+    # stock_codes = ['002506']
+    # day_dragons = get_dragon_tiger_stocks()
+    # print(day_dragons)
+    # dragons = []
+    # for code, name in day_dragons:
+    #     print(f"{code} - {name}")
+    #     dragons.append(code)
+    # print(dragons)
+    # exit()
+    # import pdb;pdb.set_trace()
+    buy_signals, sell_signals, neutral_signals = analyze_multiple_stocks(stock_codes)
 
-def backtest_strategy(stock_code, days=200):
-    """
-    对单只股票进行回测
-    :param stock_code: 股票代码
-    :param days: 回测天数
-    :return: 回测结果
-    """
-    try:
-        # 使用 StockAnalyzer 类获取数据和计算指标
-        analyzer = StockAnalyzer(stock_code=stock_code, days=days)
-        df = analyzer.df
+    # 打印统计摘要
+    print_signal_summary(buy_signals, sell_signals, neutral_signals)
 
-        if df.empty:
-            print(f"未获取到股票 {stock_code} 的历史数据")
-            return None
-
-        # 初始化回测参数
-        initial_capital = 1000000  # 初始资金10万
-        position = 0  # 持仓数量
-        capital = initial_capital  # 当前资金
-        trades = []  # 交易记录
-        holding_days = 0  # 持仓天数
-        target_return = 0.11   # 目标收益率
-        stop_loss = -0.03  # 止损线
-        entry_price = 0  # 买入价格
-
-        # 跳过前20天，确保有足够数据计算指标
-        for i in range(20, len(df)):
-            try:
-                # 更新分析器的数据窗口
-                analyzer.df = df[i - 20:i + 1]
-
-                date = df.index[i]
-                current_price = df['收盘'].iloc[i]
-
-                # 获取交易建议
-                advice = analyzer.get_trading_advice1()
-
-                # 解析交易建议中的信号
-                buy_signal = 0
-                sell_signal = 0
-
-                # 根据建议内容判断买卖信号
-                if "强烈买入信号" in advice:
-                    buy_signal += 2
-                elif "买入信号" in advice:
-                    buy_signal += 1
-                elif "强烈卖出信号" in advice:
-                    sell_signal += 2
-                elif "卖出信号" in advice:
-                    sell_signal += 1
-
-                # 分析建议中的具体理由
-                if "价格处于上升趋势" in advice:
-                    buy_signal += 1
-                if "价格处于下降趋势" in advice:
-                    sell_signal += 1
-                if "量能配合良好" in advice:
-                    buy_signal += 1
-                if "量能配合显示卖压" in advice:
-                    sell_signal += 1
-                if "技术指标显示买入信号" in advice:
-                    buy_signal += 1
-                if "技术指标显示卖出信号" in advice:
-                    sell_signal += 1
-
-                # 交易逻辑
-                if position == 0:  # 没有持仓
-                    if buy_signal >= 2:  # 至少两个买入信号
-                        position = int(capital / current_price)  # 全仓买入
-                        entry_price = current_price
-                        capital -= position * current_price
-                        trades.append({
-                            'date': date,
-                            'type': 'buy',
-                            'price': current_price,
-                            'quantity': position,
-                            'signals': buy_signal,
-                            'advice': advice,
-                            'reason': '买入理由：\n' + '\n'.join([
-                                line for line in advice.split('\n')
-                                if line.startswith('- ') and '买入' in line
-                            ])
-                        })
-                        holding_days = 0
-
-                elif position > 0:  # 持有仓位
-                    holding_days += 1
-                    current_return = (current_price - entry_price) / entry_price
-
-                    # 卖出条件
-                    sell_reason = []
-                    if current_return >= target_return:
-                        sell_reason.append(f"达到目标收益：{current_return * 100:.2f}%")
-                    if current_return <= stop_loss:
-                        sell_reason.append(f"触及止损线：{current_return * 100:.2f}%")
-                    if sell_signal >= 2 and holding_days > 5:
-                        sell_reason.append("出现强烈卖出信号且持有超过5天")
-
-                    if sell_reason:  # 有卖出理由时执行卖出
-                        capital += position * current_price
-                        trades.append({
-                            'date': date,
-                            'type': 'sell',
-                            'price': current_price,
-                            'quantity': position,
-                            'return': current_return,
-                            'holding_days': holding_days,
-                            'signals': sell_signal,
-                            'advice': advice,
-                            'reason': '卖出理由：\n- ' + '\n- '.join(sell_reason)
-                        })
-                        position = 0
-
-            except Exception as e:
-                print(f"处理第 {i} 天数据时出错: {str(e)}")
-                continue
-
-        # 计算回测结果
-        final_capital = capital + position * df['收盘'].iloc[-1]
-        total_return = (final_capital - initial_capital) / initial_capital
-
-        # 计算其他指标
-        winning_trades = [t for t in trades if t.get('return', 0) > 0]
-        losing_trades = [t for t in trades if t.get('return', 0) <= 0]
-        win_rate = len(winning_trades) / len(trades) if trades else 0
-
-        # 计算年化收益率
-        days_held = (df.index[-1] - df.index[0]).days
-        annual_return = (1 + total_return) ** (365 / days_held) - 1 if days_held > 0 else 0
-
-        return {
-            'stock_code': stock_code,
-            'initial_capital': initial_capital,
-            'final_capital': final_capital,
-            'total_return': total_return,
-            'annual_return': annual_return,
-            'number_of_trades': len(trades),
-            'win_rate': win_rate,
-            'trades': trades,
-            'position': position  # 添加当前持仓状态
-        }
-
-    except Exception as e:
-        print(f"回测股票 {stock_code} 时出错: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        return None
-
-
-def print_backtest_results(results):
-    """
-    打印回测结果
-    """
-    if not results:
-        print("回测失败")
-        return
-
-    print("\n=== 回测结果 ===")
-    print(f"股票代码: {results['stock_code']}")
-    print(f"初始资金: {results['initial_capital']:,.2f}")
-    print(f"最终资金: {results['final_capital']:,.2f}")
-    print(f"总收益率: {results['total_return'] * 100:.2f}%")
-    print(f"年化收益率: {results['annual_return'] * 100:.2f}%")
-    print(f"交易次数: {results['number_of_trades']}")
-    print(f"胜率: {results['win_rate'] * 100:.2f}%")
-
-    print("\n交易明细:")
-    for trade in results['trades']:
-        if trade['type'] == 'buy':
-            print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-                  f"价格: {trade['price']:.2f}, "
-                  f"数量: {trade['quantity']}")
-        else:
-            print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-                  f"价格: {trade['price']:.2f}, "
-                  f"数量: {trade['quantity']}, "
-                  f"收益率: {trade.get('return', 0) * 100:.2f}%, "
-                  f"持仓天数: {trade.get('holding_days', 0)}")
-
-def get_stock_names(stock_codes):
-    """
-    获取股票名称
-    """
-    try:
-        stock_names = {}
-        for code in stock_codes:
-            # 使用akshare获取股票信息
-            # import pdb;pdb.set_trace()
-
-            try:
-                # 根据股票代码前缀判断市场
-                if code.startswith('6'):
-                    market = 'sh'
-                else:
-                    market = 'sz'
-                stock_info = ak.stock_individual_info_em(symbol=f"{code}")
-                if not stock_info.empty:
-                    stock_names[code] = stock_info.iloc[1]['value']
-            except:
-                stock_names[code] = ''
-        return stock_names
-    except Exception as e:
-        print(f"获取股票名称时出错: {str(e)}")
-        return {}
-
-def visualize_backtest_results(all_results):
-    """
-    可视化多只股票的回测结果
-    :param all_results: 包含多只股票回测结果的列表
-    """
-    # 过滤掉None结果
-    valid_results = [r for r in all_results if r is not None]
-
-    if not valid_results:
-        print("没有有效的回测结果可供显示")
-        return
-    # 获取股票名称
-    stock_codes = [r['stock_code'] for r in valid_results]
-    stock_names = get_stock_names(stock_codes)
-    # 准备数据，添加股票名称
-    stock_labels = [f"{code} {stock_names.get(code, '')}" for code in stock_codes]
-    returns = [r['total_return'] * 100 for r in valid_results]
-    annual_returns = [r['annual_return'] * 100 for r in valid_results]
-    win_rates = [r['win_rate'] * 100 for r in valid_results]
-    trade_counts = [r['number_of_trades'] for r in valid_results]
-
-    # 使用默认样式
-    plt.style.use('default')
-
-    # 设置中文字体
-    try:
-        plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
-        plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
-    except:
-        print("警告：可能无法正确显示中文")
-
-    # 创建图表
-    fig = plt.figure(figsize=(15, 10))
-
-    # 1. 收益率对比
-    ax1 = plt.subplot(221)
-    bars = ax1.bar(stock_labels, returns, color='lightblue')
-    ax1.set_title('总收益率对比')
-    ax1.set_ylabel('收益率 (%)')
-    ax1.grid(True, linestyle='--', alpha=0.7)
-    plt.xticks(rotation=45)
-    # 添加数值标签
-    for bar in bars:
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'{height:.1f}%', ha='center', va='bottom')
-
-    # 2. 年化收益率对比
-    ax2 = plt.subplot(222)
-    bars = ax2.bar(stock_labels, annual_returns, color='lightgreen')
-    ax2.set_title('年化收益率对比')
-    ax2.set_ylabel('年化收益率 (%)')
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    plt.xticks(rotation=45)
-    for bar in bars:
-        height = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'{height:.1f}%', ha='center', va='bottom')
-
-    # 3. 胜率对比
-    ax3 = plt.subplot(223)
-    bars = ax3.bar(stock_labels, win_rates, color='salmon')
-    ax3.set_title('交易胜率对比')
-    ax3.set_ylabel('胜率 (%)')
-    ax3.grid(True, linestyle='--', alpha=0.7)
-    plt.xticks(rotation=45)
-    for bar in bars:
-        height = bar.get_height()
-        ax3.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'{height:.1f}%', ha='center', va='bottom')
-
-    # 4. 交易次数对比
-    ax4 = plt.subplot(224)
-    bars = ax4.bar(stock_labels, trade_counts, color='plum')
-    ax4.set_title('交易次数对比')
-    ax4.set_ylabel('交易次数')
-    ax4.grid(True, linestyle='--', alpha=0.7)
-    plt.xticks(rotation=45)
-    for bar in bars:
-        height = bar.get_height()
-        ax4.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'{int(height)}', ha='center', va='bottom')
-
-    # 调整布局
-    plt.tight_layout()
-
-    # 显示图表
-    plt.show()
-
-    # 创建收益率曲线图
-    plt.figure(figsize=(12, 6))
-
-    # 设置不同的颜色和线型
-    colors = ['blue', 'red', 'green', 'purple', 'orange', 'brown']
-    line_styles = ['-', '--', ':', '-.']
-
-    # 为每只股票绘制收益率曲线
-    for i, result in enumerate(valid_results):
-        trades = result['trades']
-        dates = [t['date'] for t in trades]
-        cumulative_returns = []
-        current_return = 0
-
-        for trade in trades:
-            if trade['type'] == 'sell':
-                current_return += trade['return'] * 100
-            cumulative_returns.append(current_return)
-
-        # 使用股票代码和名称作为标签
-        stock_code = result['stock_code']
-        stock_name = stock_names.get(stock_code, '')
-        label = f"{stock_code} {stock_name}"
-
-        color = colors[i % len(colors)]
-        line_style = line_styles[i % len(line_styles)]
-        plt.plot(dates, cumulative_returns,
-                 label=label,
-                 marker='o',
-                 color=color,
-                 linestyle=line_style,
-                 linewidth=2,
-                 markersize=6)
-
-    plt.title('累计收益率曲线')
-    plt.xlabel('交易日期')
-    plt.ylabel('累计收益率 (%)')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.xticks(rotation=45)
-
-    # 调整布局以适应图例
-    plt.tight_layout()
-    plt.show()
-
-def print_summary_statistics(all_results):
-    """
-    打印汇总统计信息
-    """
-    valid_results = [r for r in all_results if r is not None]
-
-    if not valid_results:
-        print("没有有效的回测结果可供统计")
-        return
-
-    print("\n=== 回测汇总统计 ===")
-    print(f"测试股票数量: {len(valid_results)}")
-
-    # 计算平均值
-    avg_return = np.mean([r['total_return'] * 100 for r in valid_results])
-    avg_annual_return = np.mean([r['annual_return'] * 100 for r in valid_results])
-    avg_win_rate = np.mean([r['win_rate'] * 100 for r in valid_results])
-    avg_trades = np.mean([r['number_of_trades'] for r in valid_results])
-
-    print(f"\n平均统计:")
-    print(f"平均收益率: {avg_return:.2f}%")
-    print(f"平均年化收益率: {avg_annual_return:.2f}%")
-    print(f"平均胜率: {avg_win_rate:.2f}%")
-    print(f"平均交易次数: {avg_trades:.1f}")
-
-    # 最佳表现
-    best_return = max(valid_results, key=lambda x: x['total_return'])
-    print(f"\n最佳表现股票:")
-    print(f"股票代码: {best_return['stock_code']}")
-    print(f"总收益率: {best_return['total_return'] * 100:.2f}%")
-    print(f"年化收益率: {best_return['annual_return'] * 100:.2f}%")
-    print(f"胜率: {best_return['win_rate'] * 100:.2f}%")
-    print(f"交易次数: {best_return['number_of_trades']}")
-
-def get_stock_name(code):
-    """
-    获取股票名称
-    """
-    stock_name = None
-    try:
-        # 根据股票代码前缀判断市场
-        if code.startswith('6'):
-            market = 'sh'
-        else:
-            market = 'sz'
-        stock_info = ak.stock_individual_info_em(symbol=f"{code}")
-        if not stock_info.empty:
-            stock_name = stock_info.iloc[1]['value']
-    except:
-        stock_name = ''
-    return stock_name
-
-def efi_backtesting():
-    for i  in range(42):
-        # stock_codes = ['002506', '600178', '002119', '002122', '002448',
-        #                '002703', '002673', '600392', '600489', '002261',
-        #                '002264', '002861', '002881', '002629',
-        #                '002506', '688041']
-        stock_codes = ['600178', '002119', '002122', '002448',
-                       '002703', '600392', '002156',
-                       '002264', '002861', '002881', '002629',
-                       '688041', '002506', '002594']
-        # stock_codes = ['600178', '002629', '002119']
-        # stock_codes = ['002594', '002119', '002861', '603986']
-        # day_dragons = get_dragon_tiger_stocks(date="20250221")
-        # print(day_dragons)
-        # print("=== 股票列表 ===")
-        # dragons = []
-        # stock_codes = []
-        # for code, name in day_dragons:
-        #     print(f"{code} - {name}")
-        #     stock_codes.append(code)
-        # print(stock_codes)
-        # exit()
-        # import pdb;pdb.set_trace()
-        # 分析所有股票
-        # buy_signals, sell_signals, neutral_signals = analyze_multiple_stocks(stock_codes)
-        all_results = []
-        print("\n开始回测买入信号股票...")
-        # for code, name in buy_signals:
-        # print(f"\n回测股票 {code} {name}")
-        today_trades = []
-        for code in stock_codes:
-            results = backtest_strategy(code)
-            print_backtest_results(results)
-            all_results.append(results)
-            for trade in results['trades']:
-                # print(trade['trades'])
-                today_trade = ""
-                # import pdb;pdb.set_trace()
-                if trade['type'] == 'buy':
-                    print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-                          f"价格: {trade['price']:.2f}, "
-                          f"数量: {trade['quantity']}")
-                    if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
-                        stock_name = get_stock_name(code)
-                        today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
-                                       f" 价格: {trade['price']:.2f} "\
-                                       f" 数量: {trade['quantity']}"\
-                                       f" code: {code}"\
-                                       f" name: {stock_name}"
-                        today_trades.append(today_trade)
-                else:
-                    print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-                          f"价格: {trade['price']:.2f}, "
-                          f"数量: {trade['quantity']}, "
-                          f"收益率: {trade.get('return', 0) * 100:.2f}%, "
-                          f"持仓天数: {trade.get('holding_days', 0)}")
-
-                    if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
-                        stock_name = get_stock_name(code)
-                        today_trade += f" 卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "\
-                              f" 价格: {trade['price']:.2f}, "\
-                              f" 数量: {trade['quantity']}, "\
-                              f" 收益率: {trade.get('return', 0) * 100:.2f}%, "\
-                              f" 持仓天数: {trade.get('holding_days', 0)}" \
-                              f" code: {code}"\
-                              f" name: {stock_name}"
-                        today_trades.append(today_trade)
-                        print("sell today")
-            # print(today_trades)
-            # for tra in today_trades:
-            #     if tra[0:2] == "买入":
-            #         efi_email.send(tra)
-            #     elif tra[0:2] == "卖出":
-            #         efi_email.send(tra)
-            #     else:
-            #         pass
-
-        if len(today_trades) != 0:
-            efi_email.send('\n\n'.join(today_trades))
-
-        time.sleep(600)
-
-        # 打印汇总统计
-        print_summary_statistics(all_results)
-        # # 可视化结果
-        # visualize_backtest_results(all_results)
-        # 打印统计摘要
-        # print_signal_summary(buy_signals, sell_signals, neutral_signals)
-
-        # 可视化结果
-        #visualize_signals(buy_signals, sell_signals, neutral_signals)
+    # 可视化结果
+    #visualize_signals(buy_signals, sell_signals, neutral_signals)
 
 
 if __name__ == "__main__":
-    efi_backtesting()
+    main()
