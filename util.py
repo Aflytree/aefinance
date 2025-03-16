@@ -1,7 +1,63 @@
+import time
+
 import matplotlib.pyplot as plt
 import akshare as ak
 import numpy as np
 from datetime import datetime, timedelta
+import pandas as pd
+import efinance as ef
+from pylab import mpl
+mpl.rcParams["font.sans-serif"] = ["SimHei"]
+
+
+stock_code_name_dicts = {
+            '600178': '东安动力',
+            '002122': '汇洲智能',
+            '002448': '中原内配',
+            '002703': '浙江世宝',
+            '600392': '盛和资源',
+            '002156': '通富微电',
+            '002264': '新 华 都',
+            '002861': '瀛通通讯',
+            '002629': '仁智股份',
+            '688041': '海光信息',
+            '002506': '协鑫集成',
+            '002594': '比亚迪',
+            '000710': '贝瑞基因',
+}
+
+def calculate_max_drawdown(result):
+    """
+    计算最大回撤
+    :param portfolio_values: 投资组合在每个时间点的总资产价值列表
+    :return: 最大回撤值
+    """
+
+    trades = result['trades']
+    current_capity = 1000000
+    portfolio_values = []
+
+
+    for trade in trades:
+        if trade['type'] == 'sell':
+            current_capity = trade['capital']
+
+        portfolio_values.append(current_capity)
+
+    peak = 0
+    if len(trades) == 0:
+        peck = current_capity
+    else:
+        peak = portfolio_values[0]  # 初始峰值
+
+    max_drawdown = 0
+
+    for value in portfolio_values:
+        if value > peak:
+            peak = value  # 更新峰值
+        drawdown = (peak - value) / peak  # 计算当前回撤
+        max_drawdown = max(max_drawdown, drawdown)  # 更新最大回撤
+    return max_drawdown
 
 
 def print_backtest_results(results):
@@ -11,7 +67,7 @@ def print_backtest_results(results):
     if not results:
         print("回测失败")
         return
-
+    max_drawdown = calculate_max_drawdown(results)
     print("\n=== 回测结果 ===")
     print(f"股票代码: {results['stock_code']}")
     print(f"初始资金: {results['initial_capital']:,.2f}")
@@ -20,13 +76,14 @@ def print_backtest_results(results):
     print(f"年化收益率: {results['annual_return'] * 100:.2f}%")
     print(f"交易次数: {results['number_of_trades']}")
     print(f"胜率: {results['win_rate'] * 100:.2f}%")
-
+    print(f"最大回撤: {max_drawdown * 100:.2f}%")
     print("\n交易明细:")
     for trade in results['trades']:
         if trade['type'] == 'buy':
             print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                   f"价格: {trade['price']:.2f}, "
                   f"数量: {trade['quantity']}")
+                  # f"reason: {trade['reason']}"                   )
         else:
             print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                   f"价格: {trade['price']:.2f}, "
@@ -42,8 +99,9 @@ def get_stock_names(stock_codes):
         stock_names = {}
         for code in stock_codes:
             # 使用akshare获取股票信息
-            # import pdb;pdb.set_trace()
-
+            if code in stock_code_name_dicts.keys():
+                stock_names[code] = stock_code_name_dicts[code]
+                continue
             try:
                 # 根据股票代码前缀判断市场
                 if code.startswith('6'):
@@ -51,6 +109,7 @@ def get_stock_names(stock_codes):
                 else:
                     market = 'sz'
                 stock_info = ak.stock_individual_info_em(symbol=f"{code}")
+                # import pdb;pdb.set_trace()
                 if not stock_info.empty:
                     stock_names[code] = stock_info.iloc[1]['value']
             except:
@@ -74,6 +133,7 @@ def visualize_backtest_results(all_results):
     # 获取股票名称
     stock_codes = [r['stock_code'] for r in valid_results]
     stock_names = get_stock_names(stock_codes)
+    print(stock_names)
     # 准备数据，添加股票名称
     stock_labels = [f"{code} {stock_names.get(code, '')}" for code in stock_codes]
     returns = [r['total_return'] * 100 for r in valid_results]
@@ -167,7 +227,7 @@ def visualize_backtest_results(all_results):
             if trade['type'] == 'sell':
                 current_return += trade['return'] * 100
             cumulative_returns.append(current_return)
-
+        # print(cumulative_returns)
         # 使用股票代码和名称作为标签
         stock_code = result['stock_code']
         stock_name = stock_names.get(stock_code, '')
@@ -199,7 +259,7 @@ def print_summary_statistics(all_results):
     打印汇总统计信息
     """
     valid_results = [r for r in all_results if r is not None]
-
+    # import pdb;pdb.set_trace()
     if not valid_results:
         print("没有有效的回测结果可供统计")
         return
@@ -228,12 +288,136 @@ def print_summary_statistics(all_results):
     print(f"胜率: {best_return['win_rate'] * 100:.2f}%")
     print(f"交易次数: {best_return['number_of_trades']}")
 
+
+
+def has_broken_high(stock_code, recent_years = 3):
+    """
+    recent_years: 是否突破最近recent_years的历史高点
+    """
+
+    # 获取股票的历史数据
+    historical_data = ef.stock.get_quote_history(stock_code)  # 替换为实际股票代码
+    if historical_data.empty:
+        print(f"未找到股票 {stock_code} 的历史数据。")
+        return False
+    # 将日期列转换为 datetime 格式
+    historical_data['日期'] = pd.to_datetime(historical_data['日期'])
+
+    # 获取最近三年的数据
+    three_years_ago = pd.Timestamp.today() - pd.DateOffset(years=recent_years)
+    recent_data = historical_data[historical_data['日期'] >= three_years_ago]
+
+    # 获取当前价格（假设为最新的收盘价）
+    current_price = historical_data['收盘'].iloc[-1]
+
+    # 获取历史最高点
+    historical_high = recent_data['收盘'].max()
+
+    # 判断是否突破历史最高点
+    if current_price > historical_high:
+        print(f"股票 {stock_code} 的当前价格 {current_price} 突破了最近 {recent_years} 年最高点 {historical_high}。")
+        return True
+    elif current_price > historical_high * 0.9:
+        print(f"股票 {stock_code} 的当前价格 {current_price} 接近了最近 {recent_years} 年最高点 {historical_high}。")
+        return True
+    else:
+        print(f"股票 {stock_code} 的当前价格 {current_price} 未突破最近 {recent_years} 年历史最高点 {historical_high}。")
+        return False
+
+
+def get_and_print_ideal_codes(all_results, total_return_lower_bound = 0.27,
+                      total_return_upper_bound = 0.90,
+                      win_rate = 0.47,
+                      num_of_trades = 6
+                      ):
+    """
+    打印汇总统计信息
+    """
+    valid_results = [r for r in all_results if r is not None]
+    """
+        获取total_return <30, 90>
+            win_gate > 43%
+            num_of_trades > 6
+            的所有股票
+    """
+    # 筛选符合条件的股票
+    filtered_stocks = []
+    for stock in valid_results:
+        if (total_return_lower_bound <= stock['total_return'] <= total_return_upper_bound and
+                stock['win_rate'] >= win_rate and
+                stock['number_of_trades'] > num_of_trades):
+            if has_broken_high(stock['stock_code']):
+                filtered_stocks.append({
+                    'stock_code' : stock['stock_code'],
+                    'total_return': stock['total_return'],
+                    'win_rate': stock['win_rate'],
+                    'number_of_trades': stock['number_of_trades']
+                })
+
+    # 打印符合条件的股票信息
+    print("\n=== 符合条件的股票信息 ===")
+    for index, stock in enumerate(filtered_stocks, start=1):
+        print(f"股票 {index}:")
+        print(f"  stock_code {stock['stock_code']}:")
+        print(f"  总收益率: {stock['total_return'] * 100:.2f}%")
+        print(f"  胜率: {stock['win_rate'] * 100:.2f}%")
+        print(f"  交易次数: {stock['number_of_trades']}")
+        print()  # 打印空行以便于阅读
+    if len(filtered_stocks) == 0 :
+        print("没有符合条件的理想股票")
+    return filtered_stocks
+
+def get_recent_trading_days(num_days=30):
+    # 获取最近的交易日
+    trading_days = pd.date_range(end=pd.Timestamp.today(), periods=num_days, freq='B')  # 'B' 表示工作日
+    return trading_days.tolist()
+
+def is_shenzhen_or_shanghai(stock_code):
+    # 检查股票代码是否属于深市或沪市
+    return stock_code.startswith(('0', '2', '6'))
+
+def get_recent_days_lhb_stocks(days = 30):
+    """
+    获取最近多少天的龙虎榜数据
+    """
+    # 计算最近日期
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days)
+    trades_dates = get_recent_trading_days(days)
+
+    stock_codes = []
+    for dte in trades_dates:
+
+        try:
+            # 获取最近一个月的龙虎榜数据
+            lhb_datas = ak.stock_lhb_detail_daily_sina(date=dte.strftime('%Y%m%d'))
+            if not lhb_datas.empty:
+                # 根据实际的列名调整
+                stock_info = lhb_datas[['股票代码', '股票名称']].drop_duplicates()
+                result = list(zip(stock_info['股票代码'], stock_info['股票名称']))
+
+                # 打印获取到的数据数量
+                print(f"\n {dte} 获取到 {len(result)} 只龙虎榜股票")
+
+                for code, name in result:
+                    if is_shenzhen_or_shanghai(code) :
+                        stock_codes.append(code)
+                # import pdb;pdb.set_trace()
+                pass
+        except Exception as e:
+            print(f"获取数据失败，日期: {dte}，错误: {e}")
+            time.sleep(3)
+
+    return list(set(stock_codes))
+
 def get_stock_name(code):
     """
     获取股票名称
     """
     stock_name = None
     try:
+        if code in stock_code_name_dicts.keys():
+            return  stock_code_name_dicts[code]
         # 根据股票代码前缀判断市场
         if code.startswith('6'):
             market = 'sh'
@@ -243,9 +427,6 @@ def get_stock_name(code):
         if not stock_info.empty:
             stock_name = stock_info.iloc[1]['value']
     except:
-
-
-
         stock_name = ''
     return stock_name
 
@@ -359,9 +540,6 @@ def trade_daily(code, trades):
         today_trade = ""
         # import pdb;pdb.set_trace()
         if trade['type'] == 'buy':
-            print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-                  f"价格: {trade['price']:.2f}, "
-                  f"数量: {trade['quantity']}")
             if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
                 stock_name = get_stock_name(code)
                 today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
@@ -372,12 +550,6 @@ def trade_daily(code, trades):
                                f" name: {stock_name}"
                 today_trades.append(today_trade)
         else:
-            print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
-                  f"价格: {trade['price']:.2f}, "
-                  f"数量: {trade['quantity']}, "
-                  f"收益率: {trade.get('return', 0) * 100:.2f}%, "
-                  f"持仓天数: {trade.get('holding_days', 0)}")
-
             if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
                 stock_name = get_stock_name(code)
                 today_trade += f" 卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
@@ -389,6 +561,64 @@ def trade_daily(code, trades):
                                f" code: {code}" \
                                f" name: {stock_name}"
                 today_trades.append(today_trade)
-                print("sell today")
+                # print("sell today")
     return today_trades
     # print(today_trades)
+
+
+
+def draw_stock_code_price(all_results):
+
+    for result in all_results:
+        stock_code = result['stock_code']
+        # 获取股票历史数据
+        df = ef.stock.get_quote_history(stock_code)  # 替换为实际股票代码
+        # 假设返回的数据是一个 DataFrame，包含 'date' 和 'close' 列
+        # 将日期列转换为 datetime 格式
+        df['日期'] = pd.to_datetime(df['日期'])
+
+        # 筛选最近 200 天的数据
+        end_date = df['日期'].max()
+        start_date = end_date - timedelta(days=700)
+        recent_data = df[(df['日期'] >= start_date) & (df['日期'] <= end_date)]
+
+        # 绘制价格曲线图
+        plt.figure(figsize=(10, 5))
+        plt.plot(recent_data['日期'], recent_data['收盘'], label='收盘价', color='blue')
+
+        # 标注买入和卖出
+        for trade in result['trades']:
+            trade_date = pd.to_datetime(trade['date'])
+            if trade['type'] == 'buy':
+                plt.scatter(trade_date, trade['price'], color='red',marker='x',
+                            label='买入' if '买入' not in plt.gca().get_legend_handles_labels()[1] else "")
+            elif trade['type'] == 'sell':
+                plt.scatter(trade_date, trade['price'], color='green',marker='s',
+                            label='卖出' if '卖出' not in plt.gca().get_legend_handles_labels()[1] else "")
+
+        for trade in result['buy_trades_holdings']:
+            trade_date = pd.to_datetime(trade['date'])
+            if trade['type'] == 'buy':
+                plt.scatter(trade_date, trade['price'], color='black',alpha=0.3,
+                            label='买入' if '买入' not in plt.gca().get_legend_handles_labels()[1] else "")
+        gp_name = result['stock_name'] + '股票价格曲线图'
+        plt.title(gp_name)
+        plt.xlabel('日期')
+        plt.ylabel('价格')
+        plt.legend()
+        plt.grid()
+        plt.show()
+
+def get_and_print_execution_time(start_time = 0):
+    # 记录结束时间
+    end_time = time.time()
+
+    # 计算并打印执行时间
+    execution_time = end_time - start_time
+    # 将执行时间转换为小时、分钟和秒
+    hours, remainder = divmod(execution_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # 打印执行时间
+    print(f"程序执行时间: {int(hours)} 小时 {int(minutes)} 分钟 {seconds:.6f} 秒")
+    return execution_time

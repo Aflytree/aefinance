@@ -105,14 +105,14 @@ class StockAnalyzer:
 
         # MACD金叉
         if latest_macd > latest_signal and prev_macd <= prev_signal:
-            import pdb;pdb.set_trace()
+            # import pdb;pdb.set_trace()
             self.df.to_excel(f'xxx_xxx.xlsx')
             signal['signal'] = 'buy'
             signal['strength'] = 1
             signal['message'] = 'MACD金叉'
             if latest_macd > 0:
                 signal['message_macd'] = 'MACD位于零轴上方'
-                signal['strength'] = 3
+                signal['strength'] = 1
         # MACD死叉
         elif latest_macd < latest_signal and prev_macd >= prev_signal:
             signal['signal'] = 'sell'
@@ -667,8 +667,8 @@ def analyze_multiple_stocks(stock_codes):
             # import pdb;pdb.set_trace()
             print(f"\n分析gp {code} - {stock_name}...")
 
-            analyzer = StockAnalyzer(code, days=60)
-            advice = analyzer.get_trading_advice1()
+            analyzer = StockAnalyzer(code, days=352)
+            advice = analyzer.get_trading_advice2()
 
             # 存储gp代码和名称的元组
             stock_tuple = (code, stock_name)
@@ -793,7 +793,7 @@ def main():
     stock_codes = ['002506', '600178', '000875', '002119', '002122', '002448',
                    '002703', '002673', '600392', '600489', '002261', '002156',
                    '002264', '603660', '002430', '002861', '002881', '002629']
-    # stock_codes = ['002506']
+    # stock_codes = ['002119']
     # day_dragons = get_dragon_tiger_stocks()
     # print(day_dragons)
     # dragons = []

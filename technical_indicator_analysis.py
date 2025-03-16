@@ -13,9 +13,12 @@ class StockAnalyzer:
 
     def _get_data(self):
         """获取股票数据"""
+        print("开始下载股票行情数据：", self.stock_code)
         df = ef.stock.get_quote_history(self.stock_code)
+        print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
+        print("显示股票行情数据")
         print(df)
         return df.tail(self.days)
 
@@ -35,8 +38,8 @@ class StockAnalyzer:
         # MACD指标
         exp1 = self.df['收盘'].ewm(span=12, adjust=False).mean()
         exp2 = self.df['收盘'].ewm(span=26, adjust=False).mean()
-        self.df['MACD'] = exp1 - exp2
-        self.df['Signal'] = self.df['MACD'].ewm(span=9, adjust=False).mean()
+        self.df['MACD'] = exp1 - exp2   #DIF
+        self.df['Signal'] = self.df['MACD'].ewm(span=9, adjust=False).mean() #DEA
         self.df['MACD_Hist'] = self.df['MACD'] - self.df['Signal']
 
         # 布林带
@@ -106,10 +109,10 @@ class StockAnalyzer:
             signal['signal'] = 'buy'
             signal['strength'] = 1
             signal['message'] = 'MACD金叉'
-            if latest_macd > 0:
-                print("macd jin")
+            if prev_macd > 0 and prev_signal > 0 and latest_macd > 0  and latest_signal > 0:
+                # print("macd jin")
                 signal['message_macd'] = 'MACD位于零轴上方'
-                signal['strength'] = 2
+                signal['strength'] = 3
         # MACD死叉
         elif latest_macd < latest_signal and prev_macd >= prev_signal:
             signal['signal'] = 'sell'
@@ -552,7 +555,7 @@ class StockAnalyzer:
                 advice += "- 价格处于上升趋势\n"
             if volume_analysis['volume_signal'] == '放量上涨':
                 advice += "- 量能配合良好\n"
-            if technical_analysis['strength'] > 0:
+            if technical_analysis['strength'] > 4:
                 advice += "- 技术指标显示买入信号\n"
         elif total_strength <= -3:
             advice += "强烈卖出信号\n"
@@ -608,8 +611,8 @@ class StockAnalyzer:
             if self.df['收盘'].iloc[-1] < self.df['BB_lower'].iloc[-1]:
                 advice += "- 价格触及布林带下轨\n"
             if self.df['MA5'].iloc[-1] > self.df['MA20'].iloc[-1]:
-                print(self.df['MA5'].iloc[-2])
-                print(self.df['MA20'].iloc[-2])
+                # print(self.df['MA5'].iloc[-2])
+                # print(self.df['MA20'].iloc[-2])
                 advice += "- 短期均线上穿长期均线\n"
         elif sell_strength > buy_strength:
             strength = "强" if sell_strength >= 2 else "中等"
