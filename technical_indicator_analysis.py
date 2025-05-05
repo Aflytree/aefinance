@@ -5,22 +5,26 @@ from datetime import datetime, timedelta
 
 
 class StockAnalyzer:
-    def __init__(self, stock_code='000875', days=60):
+    def __init__(self, stock_code='000875', beg='20230323', end=datetime.now().date().strftime('%Y%m%d')):
         self.stock_code = stock_code
-        self.days = days
+        self.beg = beg
+        self.end = end
         self.df = self._get_data()
         self._calculate_indicators()
 
     def _get_data(self):
         """获取股票数据"""
         print("开始下载股票行情数据：", self.stock_code)
-        df = ef.stock.get_quote_history(self.stock_code)
+        # df = ef.stock.get_quote_history(self.stock_code, beg='20240123', end = '20250317')
+        df = ef.stock.get_quote_history(self.stock_code, beg=self.beg, end=self.end )
         print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
         print("显示股票行情数据")
         print(df)
-        return df.tail(self.days)
+        # import pdb;pdb.set_trace()
+        # return df.tail(self.days)
+        return df
 
     def _calculate_indicators(self):
         """计算技术指标"""

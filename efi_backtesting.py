@@ -20,7 +20,7 @@ def backtest_strategy(stock_code,
     """
     try:
         # 使用 StockAnalyzer 类获取数据和计算指标
-        analyzer = technical_indicator_analysis.StockAnalyzer(stock_code=stock_code, days=days_)
+        analyzer = technical_indicator_analysis.StockAnalyzer(stock_code=stock_code, beg='20240223')
         df = analyzer.df
 
         if df.empty:
@@ -229,6 +229,27 @@ def backtest_strategy(stock_code,
         days_held = (df.index[-1] - df.index[0]).days
         annual_return = (1 + total_return) ** (365 / days_held) - 1 if days_held > 0 else 0
 
+        # ============= 新增夏普比率计算部分 =============
+        # 收集每日收益率
+        daily_returns = []
+        portfolio_value = initial_capital_
+
+        for i in range(20, len(df)):
+            current_price = df['收盘'].iloc[i]
+            # 计算每日组合价值
+            current_value = capital + position * current_price
+            daily_return = (current_value - portfolio_value) / portfolio_value
+            daily_returns.append(daily_return)
+            portfolio_value = current_value
+
+        # 计算夏普比率（年化）
+        risk_free_rate = 0.03  # 假设无风险利率为3%
+        sharpe_ratio = util.calculate_sharpe_ratio(
+            daily_returns,
+            risk_free_rate=risk_free_rate / 252,  # 转换为日无风险利率
+            annualized=True
+        )
+
         return {
             'stock_code': stock_code,
             'stock_name' : util.get_stock_name(stock_code),
@@ -236,6 +257,7 @@ def backtest_strategy(stock_code,
             'final_capital': final_capital,
             'total_return': total_return,
             'annual_return': annual_return,
+            'sharpe_ratio': sharpe_ratio,  # 新增夏普比率
             'number_of_trades': len(trades) / 2,
             'win_rate': win_rate,
             'trades': trades,
@@ -259,25 +281,24 @@ def efi_backtesting():
     efi_email.send("Start Stock Backtesting")
     # 记录开始时间
     start_time = time.time()
-    for i  in range(33):
+    for i  in range(50):
         stock_codes = []
-        stock_codes = ['002506', '600178', '002119', '002122', '002448',
-                       '002703', '002673', '600392', '600489', '002261',
-                       '002264', '002861', '002881', '002629',
-                       '002506', '688041']
+        # stock_codes = ['002506', '600178', '002119', '002122', '002448',
+        #                '002703', '002673', '600392', '600489', '002261',
+        #                '002264', '002861', '002881', '002629',
+        #                '002506', '688041']
         #常规关注股票
-        stock_codes =list(set(stock_codes + ['600178', '002119', '002122', '002448',
-                       '002703', '600392', '002156',
-                       '002264', '002861', '002629',
-                       '688041', '002506', '002594', '000710', '600610', '600882', '600885', '600894', '600971',
-                       '600191', '600984',]))
+        stock_codes =list(set(stock_codes + ['600178', '002119', '002448',
+                       '002703', '600392', '002156', '002629','688041', '002506',
+                       '002594', '000710', '600882', '600885', '600894',
+                       '600191', ]))
         #龙虎榜最近4个月符合条件股票  0.27 0.90, win_rate > 0.47, 交易>6
         stock_codes = list(set(stock_codes + ['603121', '002379', '002765', '600539', '002119', '000429', '600184',
                                               '600397', '603228','002927', '603686', '600255', '603881', '600967',
-                                              '002594', '002488', '603226', '600595','002112', '002361']))
+                                              '002594', '002488', '600595','002112', '002361']))
         #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
-        stock_codes = list(set(stock_codes + ['603322', '600698', '600967', '002765', '600363', '600601']))
-        # code = '600191'
+        stock_codes = list(set(stock_codes + ['603322', '600698', '600967', '002765', '600601']))
+        # code = '002119'
         # stock_codes = [code]
         # stock_codes = ['600438', '603893', '000062', '002600', '000972', '002583', '000016',
         #                '600600','002031','300718','002611', '603166']
@@ -317,9 +338,10 @@ def efi_backtesting():
                                                          )
         print(filtered_stocks)
         util.get_and_print_execution_time(start_time)
-        # efi_email.send("Waiting 10 minutes ...")
+    # exit()
         # import pdb;pdb.set_trace()
-        time.sleep(600)
+        # time.sleep(400)
+        # efi_email.send(  "Next round ...")
         # util.draw_stock_code_price(all_results)
         # # # # # # # # # # 可视化结果
         # util.visualize_backtest_results(all_results)

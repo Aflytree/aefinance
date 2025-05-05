@@ -60,6 +60,32 @@ def calculate_max_drawdown(result):
     return max_drawdown
 
 
+# 在文件顶部添加夏普比率计算函数
+def calculate_sharpe_ratio(returns, risk_free_rate=0.0, annualized=False, periods_per_year=252):
+    """
+    计算夏普比率
+    参数:
+        returns: 收益率序列
+        risk_free_rate: 无风险利率(默认0.0)
+        annualized: 是否年化(默认False)
+        periods_per_year: 年化周期数(默认252)
+    返回:
+        夏普比率
+    """
+    returns = np.asarray(returns)
+    mean_return = np.mean(returns)
+    std_return = np.std(returns, ddof=1)  # 使用样本标准差
+
+    if std_return == 0:
+        return 0.0
+
+    sharpe = (mean_return - risk_free_rate) / std_return
+
+    if annualized:
+        sharpe = sharpe * np.sqrt(periods_per_year)
+
+    return sharpe
+
 def print_backtest_results(results):
     """
     打印回测结果
@@ -74,6 +100,7 @@ def print_backtest_results(results):
     print(f"最终资金: {results['final_capital']:,.2f}")
     print(f"总收益率: {results['total_return'] * 100:.2f}%")
     print(f"年化收益率: {results['annual_return'] * 100:.2f}%")
+    print(f"夏普比率: {results['sharpe_ratio']}")
     print(f"交易次数: {results['number_of_trades']}")
     print(f"胜率: {results['win_rate'] * 100:.2f}%")
     print(f"最大回撤: {max_drawdown * 100:.2f}%")
