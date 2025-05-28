@@ -24,7 +24,169 @@ stock_code_name_dicts = {
             '002506': '协鑫集成',
             '002594': '比亚迪',
             '000710': '贝瑞基因',
+            '002927': '泰永长征',
+            '600539': '狮头股份',
+            '600255': '鑫科材料',
+            '002361': '神剑股份',
+            '002488': '金固股份',
+            '000429': '粤高速A',
+            '603881': '数据港',
+            '600882': '妙可蓝多',
+            '600601': '方正科技',
+            '603121': '华培动力',
+            '002112': '三变科技',
+            '600595': '中孚实业',
+            '600397': '安源煤业',
+            '600191': '华资实业',
+            '600894': '广日股份',
+            '002379': '宏创控股',
+            '603228': '景旺电子',
+            '600698': '湖南天雁',
+            '603322': '超讯通信',
+            '603686': '福龙马',
+            '600967': '内蒙一机',
+            '002765': '蓝黛科技',
+            '600184': '光电股份',
 }
+
+# 修改信号解析部分，增加更多技术指标考量
+def parse_trading_signals(advice):
+    '''
+    # 解析交易建议中的信号
+    buy_signal = 0
+    sell_signal = 0
+
+    # 根据建议内容判断买卖信号
+    if "强烈买入信号" in advice:
+        buy_signal += 2
+    elif "买入信号" in advice:
+        buy_signal += 1
+    elif "强烈卖出信号" in advice:
+        sell_signal += 2
+    elif "卖出信号" in advice:
+        sell_signal += 1
+
+    # 分析建议中的具体理由
+    if "价格处于上升趋势" in advice:
+        # pric_trend = 1
+        buy_signal += 1
+    if "价格处于下降趋势" in advice:
+        sell_signal += 1
+    if "量能配合良好" in advice:
+        buy_signal += 1
+        pric_trend = 1
+    if "量能配合显示卖压" in advice:
+        sell_signal += 1
+    if "技术指标显示买入信号" in advice:
+        buy_signal += 1
+    if "技术指标显示卖出信号" in advice:
+        sell_signal += 1
+    '''
+    buy_signal = 0
+    sell_signal = 0
+
+    # 基础信号
+    signal_weights = {
+        "强烈买入信号": 2,
+        "买入信号": 1,
+        "强烈卖出信号": -2,
+        "卖出信号": -1,
+        "价格处于上升趋势": 1,
+        "价格处于下降趋势": -1,
+        "量能配合良好": 1,
+        "量能配合显示卖压": -1,
+        "技术指标显示买入信号": 1,
+        "技术指标显示卖出信号": -1,
+        "超买区域": -0.5,  # 新增
+        "超卖区域": 0.5,  # 新增
+        "突破阻力位": 1,  # 新增
+        "跌破支撑位": -1  # 新增
+    }
+
+    for pattern, weight in signal_weights.items():
+        if pattern in advice:
+            if weight > 0:
+                buy_signal += weight
+            else:
+                sell_signal += abs(weight)
+
+    return buy_signal, sell_signal
+
+
+# 修改买入部分的仓位管理
+def calculate_position_size(capital, current_price, volatility, max_risk=0.02):
+    """
+    基于波动率和风险管理的仓位计算
+    max_risk: 单笔交易最大风险比例(默认2%)
+    """
+    # 计算ATR或其他波动率指标
+    atr = volatility * current_price  # 假设volatility是标准化波动率
+
+    # 计算风险调整后的仓位
+    risk_per_share = atr
+    max_loss = capital * max_risk
+    position = int(max_loss / risk_per_share)
+
+    # 确保不超过可用资金
+    max_by_capital = int(capital * 0.9 / current_price)  # 最多使用90%资金
+    return min(position, max_by_capital)
+
+
+# 在买入信号前增加市场环境判断
+def market_condition_filter(df, current_index):
+    """
+    检查市场整体趋势和波动性
+    返回: Boolean (True表示适合交易)
+    """
+    # 检查大盘趋势 (示例使用20日均线)
+    ma_20 = df['收盘'].rolling(20).mean()
+    current_ma = ma_20.iloc[current_index]
+    price_above_ma = df['收盘'].iloc[current_index] > current_ma
+
+    # 检查波动率 (示例使用ATR)
+    atr = (df['最高'] - df['最低']).rolling(14).mean()
+    current_atr = atr.iloc[current_index]
+    normalized_atr = current_atr / df['收盘'].iloc[current_index]
+
+    # 过滤条件
+    if not price_above_ma:
+        return False
+    if normalized_atr > 0.1:  # 波动过大
+        return False
+    if normalized_atr < 0.02:  # 波动过小
+        return False
+
+    return True
+
+
+# 动态止盈止损策略
+def dynamic_exit_strategy(current_return, holding_days, sell_signal, volatility):
+    sell_reasons = []
+
+    # 基础止盈止损
+    base_target = 0.11
+    base_stop_loss = -0.03
+
+    # 根据波动率调整目标
+    adjusted_target = base_target * (1 + volatility)
+    # adjusted_stop_loss = base_stop_loss * (1 + volatility)
+    adjusted_stop_loss = base_stop_loss
+
+    # 根据持有天数调整 (时间衰减效应)
+    time_factor = min(1.0, holding_days / 10)  # 10天后不再增加
+    final_target = adjusted_target * (1 + time_factor * 0.2)  # 最多增加20%
+
+    if current_return >= final_target:
+        sell_reasons.append(f"达到动态目标收益：{current_return * 100:.2f}%")
+    elif current_return <= adjusted_stop_loss:
+        sell_reasons.append(f"触及动态止损线：{current_return * 100:.2f}%")
+    elif sell_signal >= 2 and holding_days > 3:  # 强烈信号且持有3天以上
+        sell_reasons.append("强烈卖出信号")
+    elif sell_signal >= 1 and holding_days > 7:  # 普通信号且持有7天以上
+        sell_reasons.append("卖出信号且持有周期足够")
+
+    return sell_reasons
+
 
 def calculate_max_drawdown(result):
     """
