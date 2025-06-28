@@ -285,6 +285,7 @@ def efi_backtesting():
 
         all_results = []
         daily_trades = []
+        last_buys = []
 
         logging.info("\n开始回测买入信号股票...")
 
@@ -301,22 +302,28 @@ def efi_backtesting():
             util.print_backtest_results(results)
             all_results.append(results)
             daily_trades.append(util.trade_daily(code, results['trades']))
+            last_buys.append(util.last_busy(code, results['trades']))
 
         one_d_list = [item for sublist in daily_trades for item in sublist]
-        efi_email.send(one_d_list)
+        last_buys_list = [item for sublist in last_buys for item in sublist]
+        one_d_list.append("\n -------------------------------------- \n"
+                          " current holds \n "
+                           "--------------------------------------\n")
+        lt = one_d_list + last_buys_list
+        efi_email.send(lt)
         # 打印汇总统计
         util.print_summary_statistics(all_results)
-        filtered_stocks = util.get_and_print_ideal_codes(all_results,
-                                                         total_return_lower_bound=0.21,
-                                                         total_return_upper_bound=0.91,
-                                                         win_rate=0.47,
-                                                         num_of_trades=6
-                                                         )
-        print(filtered_stocks)
+        # filtered_stocks = util.get_and_print_ideal_codes(all_results,                                                                                                                                nnnnnxnzn
+        #                                                  total_return_lower_bound=0.21,
+        #                                                  total_return_upper_bound=0.91,
+        #                                                  win_rate=0.47,
+        #                                                  num_of_trades=6
+        #                                                  )
+        # print(filtered_stocks)
         util.get_and_print_execution_time(start_time)
     # exit()
         # import pdb;pdb.set_trace()
-        time.sleep(350)
+        time.sleep(400)
         # # efi_email.send(  "Next round ...")
         # util.draw_stock_code_price(all_results)
         # # # # # # # # # # 可视化结果
