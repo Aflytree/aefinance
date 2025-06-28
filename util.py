@@ -47,6 +47,8 @@ stock_code_name_dicts = {
             '600967': '内蒙一机',
             '002765': '蓝黛科技',
             '600184': '光电股份',
+            '002119': '康强电子',
+            '600885': '宏发股份',
 }
 
 # 修改信号解析部分，增加更多技术指标考量
@@ -752,7 +754,24 @@ def trade_daily(code, trades):
                 today_trades.append(today_trade)
                 # print("sell today")
     return today_trades
-    # print(today_trades)
+
+
+def last_busy(code, trades):
+    last_buy_ = ""
+    current_hold_= []
+    # import  pdb;pdb.set_trace()
+    if trades[-1]['type'] == 'buy':
+        if trades[-1]['date'].strftime('%Y-%m-%d') != datetime.now().date().strftime('%Y-%m-%d'):
+            stock_name = get_stock_name(code)
+            last_buy_ += f" 买入 - 日期: {trades[-1]['date'].strftime('%Y-%m-%d')}, " \
+                           f" 价格: {trades[-1]['price']:.2f} " \
+                           f" 数量: {trades[-1]['quantity']}" \
+                           f" reason: {trades[-1].get('reason', 0)}\n" \
+                           f" code: {code}" \
+                           f" name: {stock_name}"
+            current_hold_.append(last_buy_)
+            # print("sell today")
+    return current_hold_
 
 
 
