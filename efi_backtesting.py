@@ -128,7 +128,7 @@ def backtest_strategy(stock_code,
                                 'price': current_price,
                                 'quantity': position,
                                 'advice': advice,
-                                'reason': '卖出理由：\n- ' + '\n- '.join("xxx")
+                                'reason': '卖出理由: ' + ''.join("xxx")
                             }
                         )
 
@@ -185,7 +185,7 @@ def backtest_strategy(stock_code,
                             'holding_days': holding_days,
                             'signals': sell_signal,
                             'advice': advice,
-                            'reason': '卖出理由：\n- ' + '\n- '.join(sell_reason),
+                            'reason': '卖出理由： ' + ''.join(sell_reason),
                             'capital' : capital
                         })
                         position = 0
@@ -274,9 +274,9 @@ def efi_backtesting():
                                               '002594', '002488', '600595','002112', '002361']))
         # #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
         stock_codes = list(set(stock_codes + ['603322', '600698', '002765', '600601']))
-        # code = '600539'
+        # code = '600397'
         # stock_codes = [code]
-        # stock_codes = ['600438', '603893', '000062', '002600', '000972', '002583', '000016',
+        # stock_codes = ['600438', '603893', '000062', ·  '002600', '000972', '002583', '000016',
         #                '600600','002031','300718','002611', '603166']
         # stock_codes = ['600178', '002629', '002119']
         # stock_codes = ['002594', '002119', '002861', '603986']
@@ -291,7 +291,8 @@ def efi_backtesting():
 
         for code in stock_codes:
             results = backtest_strategy(code,
-                                        bg = '20240223',
+                                        # bg = '20210223',
+                                        bg = '20240323',
                                         initial_capital_ = 1000000,
                                         target_return_ = 0.11,
                                         stop_loss_ = -0.03,
@@ -301,8 +302,9 @@ def efi_backtesting():
                 continue
             util.print_backtest_results(results)
             all_results.append(results)
-            daily_trades.append(util.trade_daily(code, results['trades']))
-            last_buys.append(util.last_busy(code, results['trades']))
+            daily_trades.append(util.trade_daily(code, results))
+            # import pdb;pdb.set_trace()
+            last_buys.append(util.last_busy(code, results))
 
         one_d_list = [item for sublist in daily_trades for item in sublist]
         last_buys_list = [item for sublist in last_buys for item in sublist]
@@ -312,7 +314,7 @@ def efi_backtesting():
         lt = one_d_list + last_buys_list
         efi_email.send(lt)
         # 打印汇总统计
-        util.print_summary_statistics(all_results)
+        # util.print_summary_statistics(all_results)
         # filtered_stocks = util.get_and_print_ideal_codes(all_results,                                                                                                                                nnnnnxnzn
         #                                                  total_return_lower_bound=0.21,
         #                                                  total_return_upper_bound=0.91,
@@ -320,9 +322,9 @@ def efi_backtesting():
         #                                                  num_of_trades=6
         #                                                  )
         # print(filtered_stocks)
-        util.get_and_print_execution_time(start_time)
+        # util.get_and_print_execution_time(start_time)
     # exit()
-        # import pdb;pdb.set_trace()
+    #     import pdb;pdb.set_trace()
         time.sleep(400)
         # # efi_email.send(  "Next round ...")
         # util.draw_stock_code_price(all_results)

@@ -36,7 +36,7 @@ stock_code_name_dicts = {
             '603121': '华培动力',
             '002112': '三变科技',
             '600595': '中孚实业',
-            '600397': '安源煤业',
+            '600397': '江钨装备',
             '600191': '华资实业',
             '600894': '广日股份',
             '002379': '宏创控股',
@@ -247,7 +247,8 @@ def calculate_sharpe_ratio(returns, risk_free_rate=0.0, annualized=False, period
 
     if annualized:
         sharpe = sharpe * np.sqrt(periods_per_year)
-
+    # import pdb;pdb.set_trace()
+    # return np.float16(sharpe)
     return sharpe
 
 def print_backtest_results(results):
@@ -264,7 +265,7 @@ def print_backtest_results(results):
     print(f"最终资金: {results['final_capital']:,.2f}")
     print(f"总收益率: {results['total_return'] * 100:.2f}%")
     print(f"年化收益率: {results['annual_return'] * 100:.2f}%")
-    print(f"夏普比率: {results['sharpe_ratio']}")
+    print(f"夏普比率: {format(results['sharpe_ratio'], '.4f')}")
     print(f"交易次数: {results['number_of_trades']}")
     print(f"胜率: {results['win_rate'] * 100:.2f}%")
     print(f"最大回撤: {max_drawdown * 100:.2f}%")
@@ -724,19 +725,23 @@ def print_signal_summary(buy_signals, sell_signals, neutral_signals):
         print(f"- {code} {name}")
 
 
-def trade_daily(code, trades):
+def trade_daily(code, results):
+    trades = results['trades']
     today_trades = []
     for trade in trades:
         # print(trade['trades'])
         today_trade = ""
         # import pdb;pdb.set_trace()
+        #f" 数量: {trade['quantity']}" \
+        # f" reason: {trade.get('reason', 0)}\n" \
+        # f" 数量: {trade['quantity']}, " \
         if trade['type'] == 'buy':
             if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
                 stock_name = get_stock_name(code)
                 today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
-                               f" 价格: {trade['price']:.2f} " \
-                               f" 数量: {trade['quantity']}" \
-                               f" reason: {trade.get('reason', 0)}\n" \
+                               f" 价格: {trade['price']:.2f} \n" \
+                               f" 收益 : {results['total_return'] * 100: .2f}%" \
+                               f" 夏普: {format(results['sharpe_ratio'], '.4f')}\n" \
                                f" code: {code}" \
                                f" name: {stock_name}"
                 today_trades.append(today_trade)
@@ -744,10 +749,9 @@ def trade_daily(code, trades):
             if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
                 stock_name = get_stock_name(code)
                 today_trade += f" 卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
-                               f" 价格: {trade['price']:.2f}, " \
-                               f" 数量: {trade['quantity']}, " \
+                               f" 价格: {trade['price']:.2f}, \n" \
                                f" 收益率: {trade.get('return', 0) * 100:.2f}%, " \
-                               f" 持仓天数: {trade.get('holding_days', 0)}" \
+                               f" 持仓天数: {trade.get('holding_days', 0)}\n" \
                                f" reason: {trade.get('reason', 0)}\n" \
                                f" code: {code}" \
                                f" name: {stock_name}"
@@ -756,17 +760,20 @@ def trade_daily(code, trades):
     return today_trades
 
 
-def last_busy(code, trades):
+def last_busy(code, results):
+    trades = results['trades']
     last_buy_ = ""
     current_hold_= []
     # import  pdb;pdb.set_trace()
+    # f" reason: {trades[-1].get('reason', 0)}\n" \
+    #  f" 数量: {trades[-1]['quantity']}\n" \
     if trades[-1]['type'] == 'buy':
         if trades[-1]['date'].strftime('%Y-%m-%d') != datetime.now().date().strftime('%Y-%m-%d'):
             stock_name = get_stock_name(code)
-            last_buy_ += f" 买入 - 日期: {trades[-1]['date'].strftime('%Y-%m-%d')}, " \
-                           f" 价格: {trades[-1]['price']:.2f} " \
-                           f" 数量: {trades[-1]['quantity']}" \
-                           f" reason: {trades[-1].get('reason', 0)}\n" \
+            last_buy_ += f" 买入: {trades[-1]['date'].strftime('%Y-%m-%d')}, " \
+                           f" 价格: {trades[-1]['price']:.2f}\n" \
+                           f" 总收益 : {results['total_return'] * 100: .2f}%" \
+                           f" 夏普: {format(results['sharpe_ratio'], '.4f')}\n"\
                            f" code: {code}" \
                            f" name: {stock_name}"
             current_hold_.append(last_buy_)
