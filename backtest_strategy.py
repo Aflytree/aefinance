@@ -41,6 +41,14 @@ def backtest_strategy(stock_code,
         buy_trades_holdings = []
         # init_stop_n_times = 1
         stop_n_times = init_stop_n_times
+
+        # 在回测初始化部分添加
+        cumulative_loss = 0.0  # 累计亏损
+        stop_loss_count = 0  # 止损次数
+        max_drawdown = 0.0  # 最大回撤
+        # 在回测参数中添加
+        consecutive_stop_loss = 0
+        max_consecutive_stop_loss = 3
         # 计算波动率指标 (提前计算)
         df['volatility'] = (df['最高'] - df['最低']).rolling(14).mean() / df['收盘']
         # 跳过前20天，确保有足够数据计算指标
@@ -110,78 +118,176 @@ def backtest_strategy(stock_code,
                         })
                         holding_days = 0
 
+
+
+
                 elif position > 0:  # 持有仓位
+
                     if buy_signal >= 2:
-                        logging.debug(f"[持有仓位，但技术显示可以买入] buy_signal {buy_signal} ")
+                        logging.debug(f"[持有仓位，但技术显示可以买入] buy_signal {buy_signal}")
+
                         buy_trades_holdings.append(
+
                             {
+
                                 'date': date,
+
                                 'type': 'buy',
+
                                 'price': current_price,
+
                                 'quantity': position,
+
                                 'advice': advice,
+
                                 'reason': ''.join("xxx")
+
                             }
+
                         )
 
                     holding_days += 1
-                    # logging.info(f" sell_signal {buy_signal} ")
+
                     current_return = (current_price - entry_price) / entry_price
 
-                    # 卖出条件
+                    # 卖出条件 - 严格止损优先
+
                     sell_reason = []
-                    if current_return >= target_return:
-                        sell_reason.append(f"达到目标收益：{current_return * 100:.2f}%")
+
+                    is_stop_loss = False
+
+                    actual_sell_price = current_price  # 默认按当前价格卖出
+
+                    actual_return = current_return  # 默认按当前收益率
+
+                    # 严格止损逻辑：如果当前亏损超过止损点，按止损点价格计算
+
                     if current_return <= stop_loss:
-                        sell_reason.append(f"触及止损线：{current_return * 100:.2f}%")
-                    if sell_signal >= 1 and holding_days > 5:
+
+                        # 按止损点价格卖出，而不是实际收盘价
+
+                        actual_sell_price = entry_price * (1 + stop_loss)
+
+                        actual_return = stop_loss  # 亏损严格按止损点计算
+
+                        sell_reason.append(f"严格执行止损：{actual_return * 100:.2f}%")
+
+                        is_stop_loss = True
+
+                        logging.info(
+                            f"[严格止损] 避免更大亏损：收盘亏损{current_return * 100:.2f}%，按止损点{stop_loss * 100:.2f}%执行")
+
+
+                    elif current_return >= target_return:
+
+                        sell_reason.append(f"达到目标收益：{current_return * 100:.2f}%")
+
+                    elif sell_signal >= 1 and holding_days > 5:
+
                         sell_reason.append("出现强烈卖出信号且持有超过5天")
-                    # sell_reason = []
-                    # sell_reason = util.dynamic_exit_strategy(current_return, holding_days, sell_signal, volatility=current_volatility)
 
-                    if sell_reason:  # 有卖出理由时执行卖出
-                        # logging.info(f"[执行卖出] current_return {current_return} ")
+                    if sell_reason:
 
-                        # 计算当前资本
-                        current_capital = capital + position * current_price
-                        if current_capital >= peak_capital:
-                            peak_return = (current_capital - initial_capital_) / initial_capital_
-                            cumulative_gain += current_return
-                            max_drawdown = 0
-                            mode_flag = 0
-                            stop_n_times = init_stop_n_times
+                        # 计算当前资本 - 使用实际卖出价格
+
+                        current_capital = capital + position * actual_sell_price
+
+                        # 严格的止损统计
+
+                        if is_stop_loss:
+                            cumulative_loss += actual_return  # 按止损点计算的亏损
+
+                            stop_loss_count += 1
+                            # 连续止损保护
+                            if consecutive_stop_loss >= max_consecutive_stop_loss:
+                                logging.info(f"[连续止损保护] 暂停交易，连续{consecutive_stop_loss}次止损")
+                                # 可以跳过接下来几天的买入信号
+
+                            logging.debug(f"[严格止损执行] 实际亏损: {actual_return * 100:.2f}%")
+
+                            logging.debug(f"[严格止损执行] 避免亏损: {(current_return - actual_return) * 100:.2f}%")
+
+                            logging.debug(f"[止损统计] 累计亏损: {cumulative_loss * 100:.2f}%")
+
+                            logging.debug(f"[止损统计] 止损次数: {stop_loss_count}")
                         else:
-                            max_drawdown += current_return
-                            mode_flag += 1
+                            consecutive_stop_loss = 0  # 盈利交易重置计数
+
+                        # 更新最大回撤 - 基于资金曲线，而不是单笔交易收益率
 
                         if current_capital > peak_capital:
-                            logging.debug(f"[执行卖出] update peak capital")
 
-                        peak_capital = max(peak_capital, current_capital)  # 更新历史最高资金
+                            peak_capital = current_capital
 
+                            max_drawdown = 0  # 创新高时重置最大回撤
 
-                        logging.debug(f"[执行卖出] current_return {current_return}")
-                        logging.debug(f"[执行卖出] cumulative_gain {cumulative_gain}")
-                        logging.debug(f"[执行卖出] peak_capital {peak_capital}")
-                        logging.debug(f"[执行卖出] current_capital {current_capital}")
-                        logging.debug(f"[执行卖出] max_drawdown {max_drawdown}")
-                        logging.debug(f"[执行卖出] mode_flag {mode_flag}")
+                            logging.debug(f"[执行卖出] 更新峰值资金: {peak_capital:.2f}")
 
-                        capital += position * current_price
-                        trades.append({
+                        else:
+
+                            # 计算当前回撤
+
+                            current_drawdown = (peak_capital - current_capital) / peak_capital
+
+                            max_drawdown = max(max_drawdown, current_drawdown)  # 注意这里是max不是min
+
+                        # 盈利交易的累计收益统计
+
+                        if not is_stop_loss and actual_return > 0:
+                            cumulative_gain += actual_return
+
+                        # 记录交易 - 使用实际执行的价格和收益率
+
+                        trade_record = {
+
                             'date': date,
+
                             'type': 'sell',
-                            'price': current_price,
+
+                            'price': actual_sell_price,  # 记录实际卖出价格
+
                             'quantity': position,
-                            'return': current_return,
+
+                            'return': actual_return,  # 记录实际收益率
+
                             'holding_days': holding_days,
+
                             'signals': sell_signal,
+
                             'advice': advice,
+
                             'reason': ''.join(sell_reason),
-                            'capital' : capital
-                        })
+
+                            'capital': current_capital,  # 记录卖出后的资金
+
+                            'is_stop_loss': is_stop_loss,
+
+                            'avoided_loss': (current_return - actual_return) if is_stop_loss else 0  # 避免的额外亏损
+
+                        }
+
+                        trades.append(trade_record)
+
+                        # 执行卖出 - 使用实际卖出价格
+
+                        capital += position * actual_sell_price
+
                         position = 0
 
+                        holding_days = 0
+
+                        logging.debug(f"[执行卖出] 实际收益率: {actual_return * 100:.2f}%")
+
+                        logging.debug(f"[执行卖出] 当前资金: {current_capital:.2f}")
+
+                        logging.debug(f"[执行卖出] 峰值资金: {peak_capital:.2f}")
+
+                        logging.debug(f"[执行卖出] 当前回撤: {current_drawdown * 100:.2f}%")
+
+                        logging.debug(f"[执行卖出] 最大回撤: {max_drawdown * 100:.2f}%")
+
+                        if is_stop_loss:
+                            logging.debug(f"[止损效果] 避免额外亏损: {(current_return - actual_return) * 100:.2f}%")
             except Exception as e:
                 logging.debug(f"处理第 {i} 天数据时出错: {str(e)}")
                 continue

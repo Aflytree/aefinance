@@ -23,8 +23,8 @@ class StockAnalyzer:
         #############################################
         ##################afly#######################
         #############################################
-        # print("显示股票行情数据")
-        # print(df)
+        print("显示股票行情数据")
+        print(df)
         # import pdb;pdb.set_trace()
         # return df.tail(self.days)
         return df

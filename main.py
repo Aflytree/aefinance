@@ -15,10 +15,10 @@ logging.basicConfig(format='%(levelname)s : %(message)s', level=logging.INFO)
 
 def efi_backtesting():
     # recent_lhb_codes = util.get_recent_days_lhb_stocks()
-    efi_email.send("Start Stock Backtesting")
+    # efi_email.send("Start Stock Backtesting")
     # 记录开始时间
     start_time = time.time()
-    for i  in range(50):
+    for i  in range(1):
         stock_codes = []
         # stock_codes = ['002506', '600178', '002119', '002122', '002448',
         #                '002703', '002673', '600392', '600489', '002261',
@@ -28,7 +28,7 @@ def efi_backtesting():
         stock_codes =list(set(stock_codes + ['600178', '002119', '002448',
                        '002703', '600392', '002156', '002629','688041', '002506',
                        '002594', '000710', '600882', '600885', '600894',
-                       '600191', '002278','600415',]))
+                       '600191', '002278','600415','600689',]))
         #龙虎榜最近4个月符合条件股票  0.27 0.90, win_rate > 0.47, 交易>6
         stock_codes = list(set(stock_codes + ['603121', '002379', '002765', '600539', '002119', '000429', '600184',
                                               '600397', '603228','002927', '603686', '600255', '603881', '600967',
@@ -36,7 +36,7 @@ def efi_backtesting():
         # #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
         stock_codes = list(set(stock_codes + ['603322', '600698', '002765', '600601']))
         # code = '600397'
-        # stock_codes = [code]
+        stock_codes = ['600689']
         # stock_codes = ['600438', '603893', '000062', ·  '002600', '000972', '002583', '000016',
         #                '600600','002031','300718','002611', '603166']
         # stock_codes = ['600178', '002629', '002119']
@@ -53,7 +53,7 @@ def efi_backtesting():
         for code in stock_codes:
             results = backtest_strategy.backtest_strategy(code,
                                         # bg = '20210223',
-                                        bg = '20240323',
+                                        bg = '20210323',
                                         initial_capital_ = 1000000,
                                         target_return_ = 0.11,
                                         stop_loss_ = -0.03,
@@ -86,7 +86,7 @@ def efi_backtesting():
         # util.get_and_print_execution_time(start_time)
     # exit()
     #     import pdb;pdb.set_trace()
-        time.sleep(400)
+    #     time.sleep(400)/
         # # efi_email.send(  "Next round ...")
         # util.draw_stock_code_price(all_results)
         # # # # # # # # # # 可视化结果
@@ -99,31 +99,31 @@ def efi_backtesting():
 
 
 if __name__ == "__main__":
-    try:
-        # 执行回测
-        results = backtest_recent_month_dragon_stocks.backtest_recent_month_dragon_stocks()
-        print(results)
-        if results:
-            # 筛选高性能股票
-            high_performance_stocks = backtest_recent_month_dragon_stocks.filter_high_performance_stocks(results)
+    # try:
+    #     # 执行回测
+    #     results = backtest_recent_month_dragon_stocks.backtest_recent_month_dragon_stocks()
+    #     print(results)
+    #     if results:
+    #         # 筛选高性能股票
+    #         high_performance_stocks = backtest_recent_month_dragon_stocks.filter_high_performance_stocks(results)
+    #
+    #         # 打印详细信息
+    #         backtest_recent_month_dragon_stocks.print_high_performance_details(high_performance_stocks)
+    #
+    #         # 生成统计报告
+    #         backtest_recent_month_dragon_stocks.generate_performance_report(high_performance_stocks)
+    #
+    #         # 保存结果
+    #         backtest_recent_month_dragon_stocks.save_high_performance_stocks(high_performance_stocks)
+    #
+    #         print(high_performance_stocks)
+    #     else:
+    #         logging.error("回测没有返回结果")
+    #
+    #     logging.info("\n🎉 最近一个月龙虎榜股票回测完成！")
+    #
+    # except Exception as e:
+    #     logging.error(f"回测执行过程中发生错误: {str(e)}")
 
-            # 打印详细信息
-            backtest_recent_month_dragon_stocks.print_high_performance_details(high_performance_stocks)
 
-            # 生成统计报告
-            backtest_recent_month_dragon_stocks.generate_performance_report(high_performance_stocks)
-
-            # 保存结果
-            backtest_recent_month_dragon_stocks.save_high_performance_stocks(high_performance_stocks)
-
-            print(high_performance_stocks)
-        else:
-            logging.error("回测没有返回结果")
-
-        logging.info("\n🎉 最近一个月龙虎榜股票回测完成！")
-
-    except Exception as e:
-        logging.error(f"回测执行过程中发生错误: {str(e)}")
-
-
-    # efi_backtesting()
+    efi_backtesting()
