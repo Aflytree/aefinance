@@ -1,11 +1,6 @@
-import efi_email
-import util
 import technical_indicator_analysis
-import  time
-import numpy as np
-
 import logging
-logging.basicConfig(format='%(levelname)s : %(message)s', level=logging.ERROR)
+import util
 
 def backtest_strategy(stock_code,
                       bg = '20240223',
@@ -76,15 +71,16 @@ def backtest_strategy(stock_code,
                 # df.drop(['prev_close', 'tr'], axis=1, inplace=True)
                 # ========================================
 
-                logging.info(f"*****************date {date} **********************")
+                # logging.info(f"*****************date {date} **********************")
                 # 获取交易建议
                 advice = analyzer.get_trading_advice1()
+                # import pdb;pdb.set_trace()
                 buy_signal, sell_signal = util.parse_trading_signals(advice)
 
                 # 交易逻辑
                 if position == 0:  # 没有持仓
-                    logging.info(f"[没有仓位] max_drawdown {max_drawdown} ")
-                    logging.info(f"[没有仓位] drawdown_threshold {drawdown_threshold} ")
+                    # logging.info(f"[没有仓位] max_drawdown {max_drawdown} ")
+                    # logging.info(f"[没有仓位] drawdown_threshold {drawdown_threshold} ")
 
                     # if buy_signal >= 2 and util.market_condition_filter(df, i):  # 至少达到有效买入信号
                     if buy_signal >= 2 :  # 至少达到有效买入信号
@@ -99,7 +95,7 @@ def backtest_strategy(stock_code,
                                 'reason': '：\n- ' + '\n- '.join("xxx")
                             }
                         )
-                        logging.info(f"[执行买入] buy_signal {buy_signal} ")
+                        logging.debug(f"[执行买入] buy_signal {buy_signal} ")
                         position = int(capital / current_price)  # 全仓买入
                         entry_price = current_price
                         capital -= position * current_price
@@ -110,17 +106,13 @@ def backtest_strategy(stock_code,
                             'quantity': position,
                             'signals': buy_signal,
                             'advice': advice,
-                            'reason': '买入理由：\n' + '\n'.join([
-                                line for line in advice.split('\n')
-                                if line.startswith('- ') and '买入' in line
-                            ]
-                            )
+                            'reason': buy_signal
                         })
                         holding_days = 0
 
                 elif position > 0:  # 持有仓位
                     if buy_signal >= 2:
-                        logging.info(f"[持有仓位，但技术显示可以买入] buy_signal {buy_signal} ")
+                        logging.debug(f"[持有仓位，但技术显示可以买入] buy_signal {buy_signal} ")
                         buy_trades_holdings.append(
                             {
                                 'date': date,
@@ -128,7 +120,7 @@ def backtest_strategy(stock_code,
                                 'price': current_price,
                                 'quantity': position,
                                 'advice': advice,
-                                'reason': '卖出理由: ' + ''.join("xxx")
+                                'reason': ''.join("xxx")
                             }
                         )
 
@@ -148,7 +140,7 @@ def backtest_strategy(stock_code,
                     # sell_reason = util.dynamic_exit_strategy(current_return, holding_days, sell_signal, volatility=current_volatility)
 
                     if sell_reason:  # 有卖出理由时执行卖出
-                        logging.info(f"[执行卖出] current_return {current_return} ")
+                        # logging.info(f"[执行卖出] current_return {current_return} ")
 
                         # 计算当前资本
                         current_capital = capital + position * current_price
@@ -163,17 +155,17 @@ def backtest_strategy(stock_code,
                             mode_flag += 1
 
                         if current_capital > peak_capital:
-                            logging.info(f"[执行卖出] update peak capital")
+                            logging.debug(f"[执行卖出] update peak capital")
 
                         peak_capital = max(peak_capital, current_capital)  # 更新历史最高资金
 
 
-                        logging.info(f"[执行卖出] current_return {current_return}")
-                        logging.info(f"[执行卖出] cumulative_gain {cumulative_gain}")
-                        logging.info(f"[执行卖出] peak_capital {peak_capital}")
-                        logging.info(f"[执行卖出] current_capital {current_capital}")
-                        logging.info(f"[执行卖出] max_drawdown {max_drawdown}")
-                        logging.info(f"[执行卖出] mode_flag {mode_flag}")
+                        logging.debug(f"[执行卖出] current_return {current_return}")
+                        logging.debug(f"[执行卖出] cumulative_gain {cumulative_gain}")
+                        logging.debug(f"[执行卖出] peak_capital {peak_capital}")
+                        logging.debug(f"[执行卖出] current_capital {current_capital}")
+                        logging.debug(f"[执行卖出] max_drawdown {max_drawdown}")
+                        logging.debug(f"[执行卖出] mode_flag {mode_flag}")
 
                         capital += position * current_price
                         trades.append({
@@ -185,13 +177,13 @@ def backtest_strategy(stock_code,
                             'holding_days': holding_days,
                             'signals': sell_signal,
                             'advice': advice,
-                            'reason': '卖出理由： ' + ''.join(sell_reason),
+                            'reason': ''.join(sell_reason),
                             'capital' : capital
                         })
                         position = 0
 
             except Exception as e:
-                logging.info(f"处理第 {i} 天数据时出错: {str(e)}")
+                logging.debug(f"处理第 {i} 天数据时出错: {str(e)}")
                 continue
         # 计算回测结果
         final_capital = capital + position * df['收盘'].iloc[-1]
@@ -242,100 +234,7 @@ def backtest_strategy(stock_code,
         }
 
     except Exception as e:
-        logging.info(f"回测股票 {stock_code} 时出错: {str(e)}")
+        logging.debug(f"回测股票 {stock_code} 时出错: {str(e)}")
         import traceback
-        logging.info(traceback.format_exc())
+        logging.debug(traceback.format_exc())
         return None
-
-#20250317本周重点康强电子（调整到位？），盛和资源，
-        # 华资实业（均线走势好，调整到位，7元考虑进？），海南椰岛（量能放大）
-       # 仁智股份（是否突破 均线好，回撤会很大）
-       # 协鑫集成 箱体震荡
-
-def efi_backtesting():
-    # recent_lhb_codes = util.get_recent_days_lhb_stocks()
-    efi_email.send("Start Stock Backtesting")
-    # 记录开始时间
-    start_time = time.time()
-    for i  in range(50):
-        stock_codes = []
-        # stock_codes = ['002506', '600178', '002119', '002122', '002448',
-        #                '002703', '002673', '600392', '600489', '002261',
-        #                '002264', '002861', '002881', '002629',
-        #                '002506', '688041']
-        #常规关注股票
-        stock_codes =list(set(stock_codes + ['600178', '002119', '002448',
-                       '002703', '600392', '002156', '002629','688041', '002506',
-                       '002594', '000710', '600882', '600885', '600894',
-                       '600191', ]))
-        #龙虎榜最近4个月符合条件股票  0.27 0.90, win_rate > 0.47, 交易>6
-        stock_codes = list(set(stock_codes + ['603121', '002379', '002765', '600539', '002119', '000429', '600184',
-                                              '600397', '603228','002927', '603686', '600255', '603881', '600967',
-                                              '002594', '002488', '600595','002112', '002361']))
-        # #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
-        stock_codes = list(set(stock_codes + ['603322', '600698', '002765', '600601']))
-        # code = '600397'
-        # stock_codes = [code]
-        # stock_codes = ['600438', '603893', '000062', ·  '002600', '000972', '002583', '000016',
-        #                '600600','002031','300718','002611', '603166']
-        # stock_codes = ['600178', '002629', '002119']
-        # stock_codes = ['002594', '002119', '002861', '603986']
-        # stock_codes, day_dragons = util.get_dragon_tiger_stocks(date="20250312")
-        # stock_codes = util.get_recent_days_lhb_stocks(days=120)
-
-        all_results = []
-        daily_trades = []
-        last_buys = []
-
-        logging.info("\n开始回测买入信号股票...")
-
-        for code in stock_codes:
-            results = backtest_strategy(code,
-                                        # bg = '20210223',
-                                        bg = '20240323',
-                                        initial_capital_ = 1000000,
-                                        target_return_ = 0.11,
-                                        stop_loss_ = -0.03,
-                                        init_stop_n_times = 0
-                                        )
-            if results is None:
-                continue
-            util.print_backtest_results(results)
-            all_results.append(results)
-            daily_trades.append(util.trade_daily(code, results))
-            # import pdb;pdb.set_trace()
-            last_buys.append(util.last_busy(code, results))
-
-        one_d_list = [item for sublist in daily_trades for item in sublist]
-        last_buys_list = [item for sublist in last_buys for item in sublist]
-        one_d_list.append("\n -------------------------------------- \n"
-                          " current holds \n "
-                           "--------------------------------------\n")
-        lt = one_d_list + last_buys_list
-        efi_email.send(lt)
-        # 打印汇总统计
-        # util.print_summary_statistics(all_results)
-        # filtered_stocks = util.get_and_print_ideal_codes(all_results,                                                                                                                                nnnnnxnzn
-        #                                                  total_return_lower_bound=0.21,
-        #                                                  total_return_upper_bound=0.91,
-        #                                                  win_rate=0.47,
-        #                                                  num_of_trades=6
-        #                                                  )
-        # print(filtered_stocks)
-        # util.get_and_print_execution_time(start_time)
-    # exit()
-    #     import pdb;pdb.set_trace()
-        time.sleep(400)
-        # # efi_email.send(  "Next round ...")
-        # util.draw_stock_code_price(all_results)
-        # # # # # # # # # # 可视化结果
-        # util.visualize_backtest_results(all_results)
-        # # # 打印统计摘要
-        # util.logging.info_signal_summary(buy_signals, sell_signals, neutral_signals)
-
-        # 可视化结果
-        # util.visualize_signals(buy_signals, sell_signals, neutral_signals)
-
-
-if __name__ == "__main__":
-    efi_backtesting()

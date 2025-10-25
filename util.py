@@ -107,6 +107,8 @@ def parse_trading_signals(advice):
 
     for pattern, weight in signal_weights.items():
         if pattern in advice:
+            # import pdb;pdb.set_trace()
+
             if weight > 0:
                 buy_signal += weight
             else:
@@ -740,8 +742,9 @@ def trade_daily(code, results):
                 stock_name = get_stock_name(code)
                 today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
                                f" 价格: {trade['price']:.2f} \n" \
-                               f" 收益 : {results['total_return'] * 100: .2f}%" \
-                               f" 夏普: {format(results['sharpe_ratio'], '.4f')}\n" \
+                               f" 总收益 : {results['total_return'] * 100: .2f}%" \
+                               f" 夏普: {format(results['sharpe_ratio'], '.4f')}" \
+                               f" reson: {results['trades'][-1]['reason']}\n" \
                                f" code: {code}" \
                                f" name: {stock_name}"
                 today_trades.append(today_trade)
@@ -750,7 +753,7 @@ def trade_daily(code, results):
                 stock_name = get_stock_name(code)
                 today_trade += f" 卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
                                f" 价格: {trade['price']:.2f}, \n" \
-                               f" 收益率: {trade.get('return', 0) * 100:.2f}%, " \
+                               f" 本次收益率: {trade.get('return', 0) * 100:.2f}%, " \
                                f" 持仓天数: {trade.get('holding_days', 0)}\n" \
                                f" reason: {trade.get('reason', 0)}\n" \
                                f" code: {code}" \
@@ -773,7 +776,8 @@ def last_busy(code, results):
             last_buy_ += f" 买入: {trades[-1]['date'].strftime('%Y-%m-%d')}, " \
                            f" 价格: {trades[-1]['price']:.2f}\n" \
                            f" 总收益 : {results['total_return'] * 100: .2f}%" \
-                           f" 夏普: {format(results['sharpe_ratio'], '.4f')}\n"\
+                           f" 夏普: {format(results['sharpe_ratio'], '.2f')}" \
+                           f" 胜率: {results['win_rate'] * 100:.2f}%\n" \
                            f" code: {code}" \
                            f" name: {stock_name}"
             current_hold_.append(last_buy_)

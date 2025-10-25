@@ -20,8 +20,11 @@ class StockAnalyzer:
         print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
-        print("显示股票行情数据")
-        print(df)
+        #############################################
+        ##################afly#######################
+        #############################################
+        # print("显示股票行情数据")
+        # print(df)
         # import pdb;pdb.set_trace()
         # return df.tail(self.days)
         return df
