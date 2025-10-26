@@ -2,7 +2,55 @@ import efinance as ef
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import time
+import random
+import os
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import urllib3
+import pandas as pd
+import  stock_history
 
+
+
+def disable_system_proxy():
+    """禁用系统代理设置"""
+    # 方法1：清空代理环境变量
+    proxy_env_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY']
+    for var in proxy_env_vars:
+        os.environ[var] = ''
+
+    # 方法2：设置NO_PROXY
+    os.environ['NO_PROXY'] = '*'
+    os.environ['no_proxy'] = '*'
+
+    # 方法3：禁用urllib3的警告
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    print("系统代理已禁用")
+
+def setup_efinance_session():
+    """设置efinance的session，禁用代理并添加重试机制"""
+    # 创建自定义session
+    session = requests.Session()
+
+    # 禁用代理
+    session.trust_env = False
+
+    # 设置重试策略
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    # 替换efinance的默认session
+    ef.session = session
 
 class StockAnalyzer:
     def __init__(self, stock_code='000875', beg='20230323', end=datetime.now().date().strftime('%Y%m%d')):
@@ -16,7 +64,25 @@ class StockAnalyzer:
         """获取股票数据"""
         print("开始下载股票行情数据：", self.stock_code)
         # df = ef.stock.get_quote_history(self.stock_code, beg='20240123', end = '20250317')
-        df = ef.stock.get_quote_history(self.stock_code, beg=self.beg, end=self.end )
+        # import pdb;pdb.set_trace()
+        """快速禁用代理并获取数据"""
+        # 一键禁用所有代理
+        for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+            os.environ[var] = ''
+        os.environ['NO_PROXY'] = '*'
+
+        # 设置efinance不使用代理
+        # disable_system_proxy()
+        # disable_system_proxy()
+        # # df = ef.stock.get_quote_history(self.stock_code, beg=self.beg, end=self.end )
+        # setup_efinance_session()
+
+        ############################################################################
+        # 这里可以选择是使用akshare, efinance还是 baostock
+        ############################################################################
+        # df = get_stock_data_with_retry(self.stock_code, self.beg, self.end)
+        # df = get_stock_data_akshare(self.stock_code, self.beg, self.end)
+        df = stock_history.get_quote_history_baostock(self.stock_code, self.beg, self.end)
         print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
