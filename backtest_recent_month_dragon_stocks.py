@@ -13,7 +13,7 @@ def backtest_recent_month_dragon_stocks():
     # 获取当前日期
     end_date = datetime.now()
     # 计算一个月前的日期
-    start_date = end_date - timedelta(days=170)
+    start_date = end_date - timedelta(days=60)
 
     logging.info(
         f"开始回测最近一个月龙虎榜股票，时间范围: {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
@@ -61,7 +61,7 @@ def backtest_recent_month_dragon_stocks():
                     # 进行回测
                     results = backtest_strategy.backtest_strategy(
                         code,
-                        bg='20240323',  # 回测开始日期
+                        bg='20210323',  # 回测开始日期
                         initial_capital_=1000000,
                         target_return_=0.11,
                         stop_loss_=-0.03,
@@ -236,7 +236,7 @@ def filter_high_performance_stocks(all_stock_results):
             total_return = stock_result['total_return']
 
             # 筛选条件：胜率 > 70% 且 总收益率 > 200%
-            if win_rate > 0.60 and total_return > 2.00:
+            if win_rate > 0.50 and total_return > 2.00:
                 high_performance_stocks.append(stock_result)
 
         except (KeyError, TypeError, ValueError) as e:
@@ -360,3 +360,4 @@ def save_high_performance_stocks(high_performance_stocks, filename=None):
 
     except Exception as e:
         logging.error(f"保存文件时出错: {str(e)}")
+
