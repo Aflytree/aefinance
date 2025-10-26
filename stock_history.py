@@ -1,13 +1,14 @@
 import baostock as bs
 import pandas as pd
-
-import baostock as bs
-import pandas as pd
 from datetime import datetime
 import efinance as ef
 import  random
 import  time
 import akshare as ak
+import  logging
+
+logging.getLogger('baostock').setLevel(logging.ERROR)
+
 ############################################################################
 #baostock
 ############################################################################
@@ -55,7 +56,7 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
         return None
 
     try:
-        print(f"使用 Baostock 获取 {bs_code} 的数据 ({start_date} 到 {end_date})...")
+        logging.info(f"使用 Baostock 获取 {bs_code} 的数据 ({start_date} 到 {end_date})...")
 
         # 获取沪深A股历史K线数据
         rs = bs.query_history_k_data_plus(
@@ -120,7 +121,7 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
 
         df = df[efinance_columns]
 
-        print(f"成功获取 {len(df)} 条数据")
+        # print(f"成功获取 {len(df)} 条数据")
         return df
 
     except Exception as e:

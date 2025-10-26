@@ -13,7 +13,7 @@ def backtest_recent_month_dragon_stocks():
     # 获取当前日期
     end_date = datetime.now()
     # 计算一个月前的日期
-    start_date = end_date - timedelta(days=170)
+    start_date = end_date - timedelta(days=120)
 
     logging.info(
         f"开始回测最近一个月龙虎榜股票，时间范围: {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
@@ -56,12 +56,12 @@ def backtest_recent_month_dragon_stocks():
             # stock_codes = ['000014', '600617', '600748', '601608', '603011', '605255', '000027', '000592']
             for i, code in enumerate(stock_codes, 1):
                 try:
-                    logging.info(f"\n[{i}/{len(stock_codes)}] 回测股票: {code}")
+                    logging.info(f"\n[{i}/{len(stock_codes)}] 回测股票: {code} {date_str}")
 
                     # 进行回测
                     results = backtest_strategy.backtest_strategy(
                         code,
-                        bg='20240323',  # 回测开始日期
+                        bg='20220323',  # 回测开始日期
                         initial_capital_=1000000,
                         target_return_=0.11,
                         stop_loss_=-0.03,
@@ -236,7 +236,7 @@ def filter_high_performance_stocks(all_stock_results):
             total_return = stock_result['total_return']
 
             # 筛选条件：胜率 > 70% 且 总收益率 > 200%
-            if win_rate > 0.60 and total_return > 2.00:
+            if win_rate > 0.50 and total_return > 3.00:
                 high_performance_stocks.append(stock_result)
 
         except (KeyError, TypeError, ValueError) as e:

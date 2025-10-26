@@ -174,7 +174,7 @@ def backtest_strategy(stock_code,
 
                         is_stop_loss = True
 
-                        logging.info(
+                        logging.DEBUG(
                             f"[严格止损] 避免更大亏损：收盘亏损{current_return * 100:.2f}%，按止损点{stop_loss * 100:.2f}%执行")
 
 
