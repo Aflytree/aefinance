@@ -15,10 +15,10 @@ logging.basicConfig(format='%(levelname)s : %(message)s', level=logging.INFO)
 
 def efi_backtesting():
     # recent_lhb_codes = util.get_recent_days_lhb_stocks()
-    efi_email.send("Start Stock Backtesting")
+    # efi_email.send("Start Stock Backtesting")
     # 记录开始时间
     start_time = time.time()
-    for i  in range(50):
+    for i  in range(1):
         stock_codes = []
         # stock_codes = ['002506', '600178', '002119', '002122', '002448',
         #                '002703', '002673', '600392', '600489', '002261',
@@ -35,9 +35,8 @@ def efi_backtesting():
                                               '002594', '002488', '600595','002112', '002361']))
         # #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
         stock_codes = list(set(stock_codes + ['603322', '600698', '002765', '600601']))
-        stock_codes = list(set(stock_codes + ['002837', '688228', '002553', '000880','603516']))
         # code = '600397'
-        # stock_codes = ['600689']
+        stock_codes = ['600689']
         # stock_codes = ['600438', '603893', '000062', ·  '002600', '000972', '002583', '000016',
         #                '600600','002031','300718','002611', '603166']
         # stock_codes = ['600178', '002629', '002119']
@@ -54,7 +53,7 @@ def efi_backtesting():
         for code in stock_codes:
             results = backtest_strategy.backtest_strategy(code,
                                         # bg = '20210223',
-                                        bg = '20240323',
+                                        bg = '20210323',
                                         initial_capital_ = 1000000,
                                         target_return_ = 0.11,
                                         stop_loss_ = -0.03,
@@ -88,7 +87,7 @@ def efi_backtesting():
         # util.get_and_print_execution_time(start_time)
     # exit()
     #     import pdb;pdb.set_trace()
-        time.sleep(400)
+    #     time.sleep(400)/
         # # efi_email.send(  "Next round ...")
         # util.draw_stock_code_price(all_results)
         # # # # # # # # # # 可视化结果

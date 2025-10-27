@@ -1,6 +1,9 @@
 import efinance as ef
+import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import time
+import random
 import os
 import requests
 from requests.adapters import HTTPAdapter
@@ -8,7 +11,7 @@ from urllib3.util.retry import Retry
 import urllib3
 import pandas as pd
 import  stock_history
-import logging
+
 
 
 def disable_system_proxy():
@@ -59,7 +62,7 @@ class StockAnalyzer:
 
     def _get_data(self):
         """获取股票数据"""
-        # logging.info("开始下载股票行情数据：", self.stock_code)
+        print("开始下载股票行情数据：", self.stock_code)
         # df = ef.stock.get_quote_history(self.stock_code, beg='20240123', end = '20250317')
         # import pdb;pdb.set_trace()
         """快速禁用代理并获取数据"""
@@ -80,14 +83,14 @@ class StockAnalyzer:
         # df = get_stock_data_with_retry(self.stock_code, self.beg, self.end)
         # df = get_stock_data_akshare(self.stock_code, self.beg, self.end)
         df = stock_history.get_quote_history_baostock(self.stock_code, self.beg, self.end)
-        logging.info("股票行情数据下载完毕")
+        print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
         #############################################
         ##################afly#######################
         #############################################
-        # print("显示股票行情数据")
-        # print(df)
+        print("显示股票行情数据")
+        print(df)
         # import pdb;pdb.set_trace()
         # return df.tail(self.days)
         return df
