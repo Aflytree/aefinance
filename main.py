@@ -62,6 +62,7 @@ def efi_backtesting():
                                         )
             if results is None:
                 continue
+            util.calculate_holding_days_stats(results)
             util.print_backtest_results(results)
             all_results.append(results)
             daily_trades.append(util.trade_daily(code, results))

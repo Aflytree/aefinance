@@ -253,6 +253,40 @@ def calculate_sharpe_ratio(returns, risk_free_rate=0.0, annualized=False, period
     # return np.float16(sharpe)
     return sharpe
 
+
+def calculate_holding_days_stats(results):
+    """
+    计算平均持股天数统计并写入results
+    """
+    # 计算持股天数统计
+    all_holding_days = []
+    winning_days = []
+    losing_days = []
+
+    for trade in results['trades']:
+        if trade['type'] == 'sell':
+            days = trade.get('holding_days', 0)
+            all_holding_days.append(days)
+            if trade.get('return', 0) > 0:
+                winning_days.append(days)
+            else:
+                losing_days.append(days)
+
+    # 计算平均值
+    avg_all_days = sum(all_holding_days) / len(all_holding_days) if all_holding_days else 0
+    avg_win_days = sum(winning_days) / len(winning_days) if winning_days else 0
+    avg_loss_days = sum(losing_days) / len(losing_days) if losing_days else 0
+
+    # 将结果写入results
+    results['avg_holding_days'] = avg_all_days
+    results['avg_winning_holding_days'] = avg_win_days
+    results['avg_losing_holding_days'] = avg_loss_days
+    results['total_trades_count'] = len(all_holding_days)
+    results['winning_trades_count'] = len(winning_days)
+    results['losing_trades_count'] = len(losing_days)
+
+    return results
+
 def print_backtest_results(results):
     """
     打印回测结果
@@ -261,6 +295,7 @@ def print_backtest_results(results):
         print("回测失败")
         return
     max_drawdown = calculate_max_drawdown(results)
+
     print("\n=== 回测结果 ===")
     print(f"股票代码: {results['stock_code']}")
     print(f"初始资金: {results['initial_capital']:,.2f}")
@@ -271,6 +306,9 @@ def print_backtest_results(results):
     print(f"交易次数: {results['number_of_trades']}")
     print(f"胜率: {results['win_rate'] * 100:.2f}%")
     print(f"最大回撤: {max_drawdown * 100:.2f}%")
+    print(f"平均持股天数: {results['avg_holding_days']:.1f}天")
+    print(f"盈利平均持股天数: {results['avg_winning_holding_days']:.1f}天")
+    print(f"亏损平均持股天数: {results['avg_losing_holding_days']:.1f}天")
     print("\n交易明细:")
     for trade in results['trades']:
         if trade['type'] == 'buy':
