@@ -34,9 +34,9 @@ def efi_backtesting():
                                               '600397', '603228','002927', '603686', '600255', '603881', '600967',
                                               '002594', '002488', '600595','002112', '002361']))
         # #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
-        stock_codes = list(set(stock_codes + ['603322', '600698', '002765', '600601']))
+        stock_codes = list(set(stock_codes + ['603322', '600698', '600601']))
         # code = '600397'
-        stock_codes = ['600689']
+        # stock_codes = ['002765']
         # stock_codes = ['600438', '603893', '000062', ·  '002600', '000972', '002583', '000016',
         #                '600600','002031','300718','002611', '603166']
         # stock_codes = ['600178', '002629', '002119']
@@ -53,7 +53,7 @@ def efi_backtesting():
         for code in stock_codes:
             results = backtest_strategy.backtest_strategy(code,
                                         # bg = '20210223',
-                                        bg = '20210323',
+                                        bg = '20240323',
                                         initial_capital_ = 1000000,
                                         target_return_ = 0.11,
                                         stop_loss_ = -0.03,
