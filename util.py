@@ -51,6 +51,7 @@ stock_code_name_dicts = {
             '600885': '宏发股份',
             '600415': '小商品城',
             '600689': '上海三毛',
+            '002278': '神开股份',
 }
 
 # 修改信号解析部分，增加更多技术指标考量
@@ -300,6 +301,7 @@ def print_backtest_results(results):
 
     print("\n=== 回测结果 ===")
     print(f"股票代码: {results['stock_code']}")
+    print(f"股票名称: {get_stock_name(results['stock_code'])}")
     print(f"初始资金: {results['initial_capital']:,.2f}")
     print(f"最终资金: {results['final_capital']:,.2f}")
     print(f"总收益率: {results['total_return'] * 100:.2f}%")
