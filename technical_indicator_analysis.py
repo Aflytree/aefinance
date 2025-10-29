@@ -80,9 +80,9 @@ class StockAnalyzer:
         ############################################################################
         # 这里可以选择是使用akshare, efinance还是 baostock
         ############################################################################
-        # df = get_stock_data_with_retry(self.stock_code, self.beg, self.end)
+        df = stock_history.get_stock_data_with_retry(self.stock_code, self.beg, self.end)
         # df = get_stock_data_akshare(self.stock_code, self.beg, self.end)
-        df = stock_history.get_quote_history_baostock(self.stock_code, self.beg, self.end)
+        # df = stock_history.get_quote_history_baostock(self.stock_code, self.beg, self.end)
         print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
