@@ -7,49 +7,30 @@ import backtest_strategy
 import logging
 logging.basicConfig(format='%(levelname)s : %(message)s', level=logging.INFO)
 
-
-#20250317本周重点康强电子（调整到位？），盛和资源，
-        # 华资实业（均线走势好，调整到位，7元考虑进？），海南椰岛（量能放大）
-       # 仁智股份（是否突破 均线好，回撤会很大）
-       # 协鑫集成 箱体震荡
-
 def efi_backtesting():
-    # recent_lhb_codes = util.get_recent_days_lhb_stocks()
-    # efi_email.send("Start Stock Backtesting")
+    efi_email.send("Start Stock Backtesting")
     # 记录开始时间
     start_time = time.time()
-    for i  in range(1):
+    for i  in range(50):
         stock_codes = []
-        # stock_codes = ['002506', '600178', '002119', '002122', '002448',
-        #                '002703', '002673', '600392', '600489', '002261',
-        #                '002264', '002861', '002881', '002629',
-        #                '002506', '688041']
         #常规关注股票
         stock_codes =list(set(stock_codes + ['600178', '002119', '002448',
-                       '002703', '600392', '002156', '002629','688041', '002506',
-                       '002594', '000710', '600882', '600885', '600894',
-                       '600191', '002278','600415','600689',]))
+                        '600392', '002156', '002629','688041', '002506',
+                       '002594', '600882', '600885',
+                       '600191']))
         #龙虎榜最近4个月符合条件股票  0.27 0.90, win_rate > 0.47, 交易>6
-        stock_codes = list(set(stock_codes + ['603121', '002379', '002765', '600539', '002119', '000429', '600184',
-                                              '600397', '603228','002927', '603686', '600255', '603881', '600967',
-                                              '002594', '002488', '600595','002112', '002361']))
-        # #days=90, 龙虎榜最近4个月符合条件股票  0.21 0.71, win_rate > 0.47, 交易>4
-        stock_codes = list(set(stock_codes + ['603322', '600698', '600601']))
-        # code = '600397'
-        # stock_codes = ['002765']
-        # stock_codes = ['600438', '603893', '000062', ·  '002600', '000972', '002583', '000016',
-        #                '600600','002031','300718','002611', '603166']
-        # stock_codes = ['600178', '002629', '002119']
-        # stock_codes = ['002594', '002119', '002861', '603986']
+        stock_codes = list(set(stock_codes + ['603121', '002379', '600539', '002119', '600184',
+                                              '600397', '603228','002927', '603686', '603881', '600967',
+                                              '002594', '600595', '002361']))
+        #20251029 add
+        stock_codes = list(set(stock_codes + ['600415', '002278', '600689', '603336', '603839','603336']))
+        # stock_codes = ['600689']
         # stock_codes, day_dragons = util.get_dragon_tiger_stocks(date="20251022")
         # stock_codes = util.get_recent_days_lhb_stocks(days=120)
-
         all_results = []
         daily_trades = []
         last_buys = []
-
         logging.info("\n开始回测买入信号股票...")
-
         for code in stock_codes:
             results = backtest_strategy.backtest_strategy(code,
                                         # bg = '20210223',
@@ -83,11 +64,8 @@ def efi_backtesting():
         #                                                  win_rate=0.47,
         #                                                  num_of_trades=6
         #                                                  )
-        # print(filtered_stocks)
         # util.get_and_print_execution_time(start_time)
-    # exit()
-    #     import pdb;pdb.set_trace()
-    #     time.sleep(400)/
+        time.sleep(400)
         # # efi_email.send(  "Next round ...")
         # util.draw_stock_code_price(all_results)
         # # # # # # # # # # 可视化结果
