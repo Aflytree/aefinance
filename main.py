@@ -1,7 +1,7 @@
 import efi_email
 import util
 import  time
-import backtest_recent_month_dragon_stocks
+import backtest_dragon_stocks
 import backtest_strategy
 
 import logging
@@ -76,33 +76,18 @@ def efi_backtesting():
         # 可视化结果
         # util.visualize_signals(buy_signals, sell_signals, neutral_signals)
 
+def do_lhb_efi_backtesting():
+    try:
+        # 执行回测
+        backtest_dragon_stocks.backtest_recent_dragon_stocks(
+                                                            total_lhb_days = 60,
+                                                            single_stock_start_date = '20210323',
+                                                            win_rate_th = 0.50,
+                                                            total_return = 3.00)
+    except Exception as e:
+        logging.error(f"回测执行过程中发生错误: {str(e)}")
+
 
 if __name__ == "__main__":
-    # try:
-    #     # 执行回测
-    #     results = backtest_recent_month_dragon_stocks.backtest_recent_month_dragon_stocks()
-    #     print(results)
-    #     if results:
-    #         # 筛选高性能股票
-    #         high_performance_stocks = backtest_recent_month_dragon_stocks.filter_high_performance_stocks(results)
-    #
-    #         # 打印详细信息
-    #         backtest_recent_month_dragon_stocks.print_high_performance_details(high_performance_stocks)
-    #
-    #         # 生成统计报告
-    #         backtest_recent_month_dragon_stocks.generate_performance_report(high_performance_stocks)
-    #
-    #         # 保存结果
-    #         backtest_recent_month_dragon_stocks.save_high_performance_stocks(high_performance_stocks)
-    #
-    #         print(high_performance_stocks)
-    #     else:
-    #         logging.error("回测没有返回结果")
-    #
-    #     logging.info("\n🎉 最近一个月龙虎榜股票回测完成！")
-    #
-    # except Exception as e:
-    #     logging.error(f"回测执行过程中发生错误: {str(e)}")
-
-
+    # do_lhb_efi_backtesting()
     efi_backtesting()

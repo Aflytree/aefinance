@@ -1,8 +1,8 @@
 import technical_indicator_analysis
 import logging
 import util
-STRICT_STOP_LOSS = False
 
+STRICT_STOP_LOSS = False
 def backtest_strategy(stock_code,
                       bg = '20240223',
                       initial_capital_ = 1000000,

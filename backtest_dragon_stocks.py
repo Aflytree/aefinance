@@ -5,20 +5,21 @@ import time
 import util
 import backtest_strategy
 
-
-def backtest_recent_month_dragon_stocks():
+def backtest_recent_dragon_stocks(total_lhb_days = 170, single_stock_start_date = '20240323',
+                                  win_rate_th = 0.60,
+                                  total_return = 2.00):
     """
-    自动遍历最近一个月每天的龙虎榜股票并进行回测
+    自动遍历最近每天的龙虎榜股票并进行回测
     """
     # 获取当前日期
     end_date = datetime.now()
-    # 计算一个月前的日期
-    start_date = end_date - timedelta(days=170)
+    # 计算日期
+    start_date = end_date - timedelta(days=total_lhb_days)
 
     logging.info(
-        f"开始回测最近一个月龙虎榜股票，时间范围: {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
+        f"开始回测最近龙虎榜股票，时间范围: {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
 
-    # 生成最近一个月的所有日期
+    # 生成最近的所有日期
     date_range = pd.date_range(start=start_date, end=end_date)
 
     all_stock_results = []  # 改为存储所有单个股票的结果
@@ -29,7 +30,6 @@ def backtest_recent_month_dragon_stocks():
 
     for current_date in date_range:
         date_str = current_date.strftime('%Y%m%d')
-
         # 跳过周末（可选，因为股票市场周末不交易）
         if current_date.weekday() >= 5:  # 5=周六, 6=周日
             continue
@@ -61,7 +61,7 @@ def backtest_recent_month_dragon_stocks():
                     # 进行回测
                     results = backtest_strategy.backtest_strategy(
                         code,
-                        bg='20240323',  # 回测开始日期
+                        bg= single_stock_start_date,  # 回测开始日期
                         initial_capital_=1000000,
                         target_return_=0.11,
                         stop_loss_=-0.03,
@@ -114,17 +114,21 @@ def backtest_recent_month_dragon_stocks():
             continue
 
     # 生成月度汇总报告
-    generate_monthly_report(summary_stats, total_stocks_tested, successful_tests, all_stock_results)
+    generate_monthly_report(summary_stats, total_stocks_tested, successful_tests, all_stock_results,
+                            win_rate_th,
+                            total_return)
 
     return all_stock_results  # 返回所有单个股票的结果
 
 
-def generate_monthly_report(summary_stats, total_stocks, successful_tests, all_stock_results):
+def generate_monthly_report(summary_stats, total_stocks, successful_tests, all_stock_results,
+                            win_rate_th = 0.60,
+                            total_return = 2.00):
     """
     生成月度回测汇总报告
     """
     logging.info(f"\n{'=' * 80}")
-    logging.info("📊 最近一个月龙虎榜股票回测汇总报告")
+    logging.info("📊 最近龙虎榜股票回测汇总报告")
     logging.info(f"{'=' * 80}")
 
     total_days = len(summary_stats)
@@ -146,10 +150,10 @@ def generate_monthly_report(summary_stats, total_stocks, successful_tests, all_s
     # 立即进行高性能股票筛选和展示
     if all_stock_results:
         logging.info(f"\n开始筛选高性能股票...")
-        high_performance_stocks = filter_high_performance_stocks(all_stock_results)
-        print_high_performance_details(high_performance_stocks)
+        high_performance_stocks = filter_high_performance_stocks(all_stock_results, win_rate_th, total_return)
+        print_high_performance_details(high_performance_stocks, win_rate_th, total_return)
         generate_performance_report(high_performance_stocks)
-        save_high_performance_stocks(high_performance_stocks)
+        save_high_performance_stocks(high_performance_stocks, win_rate_th, total_return)
     else:
         logging.info("没有回测结果可供筛选")
 
@@ -210,9 +214,9 @@ def main():
 
     try:
         # 执行回测
-        results = backtest_recent_month_dragon_stocks()
+        results = backtest_recent_dragon_stocks()
 
-        logging.info("\n🎉 最近一个月龙虎榜股票回测完成！")
+        logging.info("\n🎉 最近龙虎榜股票回测完成！")
         return results
 
     except Exception as e:
@@ -220,9 +224,9 @@ def main():
         return None
 
 
-def filter_high_performance_stocks(all_stock_results):
+def filter_high_performance_stocks(all_stock_results, win_rate_th = 0.60, total_return = 2.00):
     """
-    筛选胜率超过70%且收益率超过200%的高性能股票
+    筛选胜率性能股票
     """
     high_performance_stocks = []
 
@@ -233,10 +237,11 @@ def filter_high_performance_stocks(all_stock_results):
                 continue
 
             win_rate = stock_result['win_rate']
-            total_return = stock_result['total_return']
+            total_return_ = stock_result['total_return']
 
-            # 筛选条件：胜率 > 70% 且 总收益率 > 200%
-            if win_rate > 0.60 and total_return > 2.00:
+            # 筛选条件
+            if win_rate >= win_rate_th and total_return_ >= total_return:
+                # import pdb;pdb.set_trace()
                 high_performance_stocks.append(stock_result)
 
         except (KeyError, TypeError, ValueError) as e:
@@ -246,16 +251,16 @@ def filter_high_performance_stocks(all_stock_results):
     return high_performance_stocks
 
 
-def print_high_performance_details(high_performance_stocks):
+def print_high_performance_details(high_performance_stocks,win_rate_th = 0.60, total_return = 2.00):
     """
     打印高性能股票的详细信息
     """
     if not high_performance_stocks:
-        logging.info("❌ 没有找到胜率超过70%且收益率超过200%的股票")
+        logging.info(f"❌ 没有找到胜率超过{win_rate_th}且收益率超过{total_return}%的股票")
         return
 
     logging.info(f"\n{'=' * 100}")
-    logging.info("🎯 高性能股票筛选结果（胜率>70% 且 收益率>200%）")
+    logging.info(f"🎯 高性能股票筛选结果（胜率>{win_rate_th} 且 收益率>{total_return}%）")
     logging.info(f"{'=' * 100}")
     logging.info(f"共找到 {len(high_performance_stocks)} 只符合条件的股票")
     logging.info(f"{'=' * 100}")
@@ -308,6 +313,8 @@ def generate_performance_report(high_performance_stocks):
 
     # 收益率分布
     return_ranges = {
+        "000%-100%": 0,
+        "100%-200%": 0,
         "200%-300%": 0,
         "300%-400%": 0,
         "400%-500%": 0,
@@ -316,7 +323,11 @@ def generate_performance_report(high_performance_stocks):
 
     for stock in high_performance_stocks:
         return_rate = stock['total_return']
-        if 2.0 <= return_rate < 3.0:
+        if 0.0 <= return_rate < 1.0:
+            return_ranges["000%-100%"] += 1
+        elif 1.0 <= return_rate < 2.0:
+            return_ranges["100%-200%"] += 1
+        elif 2.0 <= return_rate < 3.0:
             return_ranges["200%-300%"] += 1
         elif 3.0 <= return_rate < 4.0:
             return_ranges["300%-400%"] += 1
@@ -332,7 +343,7 @@ def generate_performance_report(high_performance_stocks):
             logging.info(f"  {range_name}: {count}只 ({percentage:.1f}%)")
 
 
-def save_high_performance_stocks(high_performance_stocks, filename=None):
+def save_high_performance_stocks(high_performance_stocks, win_rate_th = 0.60, total_return = 2.00, filename=None):
     """
     将高性能股票保存到文件
     """
@@ -342,7 +353,7 @@ def save_high_performance_stocks(high_performance_stocks, filename=None):
 
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write("高性能股票列表（胜率>70% 且 收益率>200%）\n")
+            f.write(f"高性能股票列表（胜率> {win_rate_th} 且 收益率 > {total_return}）\n")
             f.write("=" * 60 + "\n")
             f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"股票数量: {len(high_performance_stocks)}\n\n")
