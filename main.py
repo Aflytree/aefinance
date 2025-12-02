@@ -14,13 +14,14 @@ def efi_backtesting():
     for i  in range(50):
         stock_codes = []
         #常规关注股票
-        stock_codes =list(set(stock_codes + ['002119', '002448',
+        stock_codes =list(set(stock_codes + [ '002119', '002448',
                           '002629', '002506',
+                        '600885',
                        '600191']))
         #龙虎榜最近4个月符合条件股票  0.27 0.90, win_rate > 0.47, 交易>6
         stock_codes = list(set(stock_codes + ['002379', '600539', '002119', '600184',
-                                              '600397', '603228','002927', '603686', '603881', '600967',
-                                               '600595', '002361']))
+                                              '600397','002927', '603686', '603881', '600967',
+                                                '002361']))
         #20251029 add
         stock_codes = list(set(stock_codes + ['600415', '002278', '600689', '603336', '603839','603336']))
         # stock_codes = ['600689']
@@ -65,15 +66,14 @@ def efi_backtesting():
         #                                                  )
         # util.get_and_print_execution_time(start_time)
         time.sleep(400)
-        # # efi_email.send(  "Next round ...")
-        # util.draw_stock_code_price(all_results)
         # # # # # # # # # # 可视化结果
         # util.visualize_backtest_results(all_results)
         # # # 打印统计摘要
         # util.logging.info_signal_summary(buy_signals, sell_signals, neutral_signals)
 
-        # 可视化结果
+        # # 可视化结果
         # util.visualize_signals(buy_signals, sell_signals, neutral_signals)
+
 
 def do_lhb_efi_backtesting():
     try:

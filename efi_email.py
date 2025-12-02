@@ -38,7 +38,8 @@ def send(body):
     # 条件判断示例
     condition = True  # 这里可以根据实际情况修改条件
     if condition:
-        receiver = '17301333257@163.com'
+        receiver = '19282286879@163.com'
+        # receiver = '17301333257@163.com'
         sender = 'zhangaifei.2008@163.com'
         subject = '测试邮件'
         # body = '这是一个update更新：'
