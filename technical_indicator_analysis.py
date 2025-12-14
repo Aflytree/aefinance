@@ -453,7 +453,7 @@ class StockAnalyzer:
             analysis['strength'] = abs(trend_strength)
         elif trend_strength <= -2:
             analysis['trend'] = '下降'
-            analysis['strength'] = abs(trend_strength)
+            analysis['strength'] = trend_strength
         else:
             analysis['trend'] = '震荡'
             analysis['strength'] = 0
