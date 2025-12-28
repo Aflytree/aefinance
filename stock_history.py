@@ -11,7 +11,7 @@ import akshare as ak
 ############################################################################
 #baostock
 ############################################################################
-def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1'):
+def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1', day_or_week= "d"):
     """
     仿照 efinance 接口的 Baostock 数据获取函数
     参数:
@@ -63,7 +63,7 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
             "date,open,high,low,close,volume,amount,turn,pctChg",
             start_date=start_date,
             end_date=end_date,
-            frequency="d",  # 日线数据
+            frequency=day_or_week,  # 日线数据/周线
             adjustflag=adjustflag  # 复权类型
         )
 
@@ -198,6 +198,50 @@ def get_stock_data_akshare(stock_code, beg='20210323', end=None):
 ############################################################################
 #efince
 ############################################################################
+
+
+def get_weekly_data_baostock(self):
+    """使用baostock获取周线数据"""
+    import baostock as bs
+
+    try:
+        # 登陆系统
+        lg = bs.login()
+
+        # 获取周线数据
+        rs = bs.query_history_k_data_plus(
+            f"sh.{self.stock_code}" if self.stock_code.startswith('6') else f"sz.{self.stock_code}",
+            "date,open,high,low,close,volume,amount",
+            start_date=self.beg,
+            end_date=self.end,
+            frequency="w",  # 周线
+            adjustflag="2"  # 前复权
+        )
+
+        data_list = []
+        while (rs.error_code == '0') & rs.next():
+            data_list.append(rs.get_row_data())
+
+        df = pd.DataFrame(data_list, columns=rs.fields)
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+
+        # 转换数据类型
+        for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
+            df[col] = pd.to_numeric(df[col])
+
+        # 重命名列
+        df.rename(columns={
+            'open': '开盘', 'high': '最高', 'low': '最低',
+            'close': '收盘', 'volume': '成交量', 'amount': '成交额'
+        }, inplace=True)
+
+        bs.logout()
+        return df
+
+    except Exception as e:
+        print(f"baostock获取周线数据失败: {e}")
+        return None
 
 def get_stock_data_with_retry(stock_code, beg, end, max_retries=5):
     for attempt in range(max_retries):

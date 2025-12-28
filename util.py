@@ -320,14 +320,15 @@ def print_backtest_results(results):
         if trade['type'] == 'buy':
             print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                   f"价格: {trade['price']:.2f}, "
-                  f"数量: {trade['quantity']}")
-                  # f"reason: {trade['reason']}"                   )
+                  f"数量: {trade['quantity']}, "
+                  f"reason: {trade['reason']}")
         else:
             print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                   f"价格: {trade['price']:.2f}, "
                   f"数量: {trade['quantity']}, "
                   f"收益率: {trade.get('return', 0) * 100:.2f}%, "
-                  f"持仓天数: {trade.get('holding_days', 0)}")
+                  f"持仓天数: {trade.get('holding_days', 0)}, "
+                  f"reason: {trade['reason']}")
 
 def get_stock_names(stock_codes):
     """
@@ -814,6 +815,8 @@ def last_busy(code, results):
     # import  pdb;pdb.set_trace()
     # f" reason: {trades[-1].get('reason', 0)}\n" \
     #  f" 数量: {trades[-1]['quantity']}\n" \
+    if len(trades) == 0:
+        return
     if trades[-1]['type'] == 'buy':
         if trades[-1]['date'].strftime('%Y-%m-%d') != datetime.now().date().strftime('%Y-%m-%d'):
             stock_name = get_stock_name(code)

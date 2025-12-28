@@ -1,3 +1,5 @@
+import pdb
+
 import efinance as ef
 import pandas as pd
 import numpy as np
@@ -58,8 +60,48 @@ class StockAnalyzer:
         self.beg = beg
         self.end = end
         self.df = self._get_data()
+        self.weekly_df = self._get_and_prepare_weekly_data(stock_code, beg, end)
         self._calculate_indicators()
 
+    def _get_and_prepare_weekly_data(self, stock_code, beg, end):
+        """获取并准备周线数据（获取更长的历史数据）"""
+        # 为了正确计算MA20，需要至少提前40周（10个月）的数据
+        # 将起始日期提前一年
+        import datetime
+        from dateutil.relativedelta import relativedelta
+
+        # 将beg转换为datetime
+        beg_date = datetime.datetime.strptime(beg, '%Y%m%d')
+        # 提前10个月获取数据
+        extended_beg = (beg_date - relativedelta(months=10)).strftime('%Y%m%d')
+
+        print(f"📅 获取周线数据：")
+        print(f"  请求日期: {beg} 到 {end}")
+        print(f"  实际获取: {extended_beg} 到 {end}（提前10个月）")
+
+        weekly_df = stock_history.get_quote_history_baostock(
+            stock_code, extended_beg, end, day_or_week="w"
+        )
+
+        if weekly_df is None or weekly_df.empty:
+            print("⚠️  未能获取周线数据")
+            return None
+
+        # 确保日期列存在并转换为datetime
+        if '日期' in weekly_df.columns:
+            weekly_df['日期'] = pd.to_datetime(weekly_df['日期'])
+            weekly_df.set_index('日期', inplace=True)
+
+        print(f"✅ 周线数据获取完成: {len(weekly_df)} 周")
+        print(f"   实际日期范围: {weekly_df.index[0]} 到 {weekly_df.index[-1]}")
+
+        # 验证数据量
+        if len(weekly_df) < 20:
+            print(f"⚠️  警告：只有{len(weekly_df)}周数据，至少需要20周计算MA20")
+
+        return weekly_df
+
+        return weekly_df
     def _get_data(self):
         """获取股票数据"""
         print("开始下载股票行情数据：", self.stock_code)
@@ -135,6 +177,7 @@ class StockAnalyzer:
         # 获取最近的价格数据
         recent_prices = df['收盘'].tail(window)
         current_price = recent_prices.iloc[-1]
+        # import pdb;pdb.set_trace()
 
         # 计算价格区间
         price_range = np.arange(
@@ -324,7 +367,7 @@ class StockAnalyzer:
 
         if len(bottoms) < 2:
             return False
-
+        # import pdb;pdb.set_trace()
         # 检查最后两个底部
         last_two_bottoms = bottoms[-2:]
         if len(last_two_bottoms) == 2:
@@ -395,16 +438,252 @@ class StockAnalyzer:
 
         return signals
 
+    def get_weekly_data_from_daily(self):
+        """从日线数据转换为周线数据"""
+        # 确保日期索引是DatetimeIndex
+        if not isinstance(self.df.index, pd.DatetimeIndex):
+            self.df.index = pd.to_datetime(self.df.index)
+
+        # 按周重新采样（周一为一周的开始）
+        weekly_df = self.df.resample('W-MON').agg({
+            '开盘': 'first',  # 周一的开盘价
+            '最高': 'max',  # 一周的最高价
+            '最低': 'min',  # 一周的最低价
+            '收盘': 'last',  # 周五的收盘价
+            '成交量': 'sum'  # 一周的总成交量
+        }).dropna()  # 删除空值
+
+        return weekly_df
+
+    def analyze_weekly_moving_averages(self, current_date=None):
+        """分析周线均线系统（修复版本）"""
+        if self.weekly_df is None or len(self.weekly_df) < 5:
+            return {"error": "周线数据不足"}
+
+        # 确保weekly_df有正确的日期索引
+        if not isinstance(self.weekly_df.index, pd.DatetimeIndex):
+            print("⚠️  周线数据索引不是日期类型，尝试修复...")
+            # 尝试找到日期列
+            for col in self.weekly_df.columns:
+                if '日期' in str(col).lower() or 'date' in str(col).lower():
+                    self.weekly_df.index = pd.to_datetime(self.weekly_df[col])
+                    break
+
+        # 计算周线均线
+        weekly_df = self.weekly_df.copy()
+        weekly_df['MA5'] = weekly_df['收盘'].rolling(window=5, min_periods=1).mean()
+        weekly_df['MA10'] = weekly_df['收盘'].rolling(window=10, min_periods=1).mean()
+        weekly_df['MA20'] = weekly_df['收盘'].rolling(window=20, min_periods=1).mean()
+
+        # 如果传入日期，找到对应的周线数据
+        if current_date is not None:
+            # 转换为pandas Timestamp
+            if not isinstance(current_date, pd.Timestamp):
+                current_date = pd.to_datetime(current_date)
+
+            # 找到包含current_date的周线（周线数据索引是周五日期）
+            # 找到离current_date最近的周五
+            week_end_date = self._find_week_end_date(current_date)
+            #
+            # print(f"📅 查找周线数据:")
+            # print(f"  当前日期: {current_date.strftime('%Y-%m-%d')}")
+            # print(f"  对应周五: {week_end_date.strftime('%Y-%m-%d')}")
+
+            # 在周线数据中查找这个周五
+            matching_dates = weekly_df.index[weekly_df.index == week_end_date]
+
+            if len(matching_dates) > 0:
+                target_date = matching_dates[0]
+                # 找到这个日期在DataFrame中的位置
+                mask = weekly_df.index == target_date
+                latest_idx = weekly_df[mask].index[0]
+
+                # 获取这一行的索引位置
+                idx_position = weekly_df.index.get_loc(latest_idx)
+                prev_idx = max(idx_position - 1, 0)
+
+                latest = weekly_df.iloc[idx_position]
+                prev = weekly_df.iloc[prev_idx]
+
+                # print(f"✅ 找到对应周线数据: {latest_idx.strftime('%Y-%m-%d')}")
+            else:
+                # 如果找不到精确匹配，找最近的一周
+                # print("⚠️  未找到精确匹配，使用最接近的周线数据")
+                # 计算每个周线日期与目标日期的差值
+                date_diffs = abs((weekly_df.index - week_end_date).days)
+                closest_idx = date_diffs.idxmin()
+                idx_position = weekly_df.index.get_loc(closest_idx)
+
+                latest = weekly_df.iloc[idx_position]
+                prev = weekly_df.iloc[max(idx_position - 1, 0)]
+
+                # print(f"📊 使用最近周线: {closest_idx.strftime('%Y-%m-%d')}")
+        else:
+            # 使用最新数据
+            latest = weekly_df.iloc[-1]
+            prev = weekly_df.iloc[-2] if len(weekly_df) > 1 else latest
+            # print(f"📊 使用最新周线数据: {weekly_df.index[-1].strftime('%Y-%m-%d')}")
+
+        # import pdb;pdb.set_trace()
+        # 分析信号
+        return self._analyze_weekly_ma_signals(latest, prev)
+
+    def _find_week_end_date(self, current_date):
+        """找到包含当前日期的周五日期"""
+        # 计算当前是星期几 (0=周一, 1=周二, ..., 4=周五)
+        weekday = current_date.weekday()
+
+        if weekday == 4:  # 已经是周五
+            return current_date
+        # elif weekday < 4:  # 周一至周四
+        #     # 本周的周五还没到，返回上周五
+        #     days_before = weekday + 3  # 周一需要退3天到上周五，周二退4天...
+        #     return current_date - pd.Timedelta(days=days_before)
+        elif weekday < 4:  # 周一至周四
+            # 本周的周五还没到，返回本周五
+            days_after = 4 - weekday  # 周一需要加4天到周五，周二加3天...
+            return current_date + pd.Timedelta(days=days_after)
+        else:  # 周六或周日
+            # 周末，返回本周五（已经过去）
+            days_before = weekday - 4  # 周六退1天，周日退2天
+            return current_date - pd.Timedelta(days=days_before)
+
+    def _analyze_weekly_ma_signals(self, latest, prev):
+        """分析周线MA信号"""
+        analysis = {
+            'current_values': {
+                '收盘价': latest['收盘'],
+                'MA5': latest['MA5'],
+                'MA10': latest['MA10'],
+                'MA20': latest['MA20']
+            },
+            'signals': [],
+            'strength': 0
+        }
+        # print()
+        # 改进的信号判断逻辑
+        current_diff = latest['MA5'] - latest['MA20']
+        prev_diff = prev['MA5'] - prev['MA20']
+        # print(f"MA5={latest['MA5']:.2f}, MA20={latest['MA20']:.2f}, diff={current_diff:.2f}")
+        # 判断突破信号（使用相对阈值）
+        threshold = max(abs(current_diff) * 0.3, 0.01)  # 30%的差值或最小0.01
+        # import pdb;pdb.set_trace()
+        # MA5突破MA20判断
+        if current_diff > 0:
+            if prev_diff <= 0 or (prev_diff > 0 and current_diff > prev_diff * 1.2):
+                # 从下方突破或显著加强
+                analysis['signals'].append('🟢 MA5上穿/强势突破MA20')
+                analysis['strength'] += 3
+                # print("🟢 MA5上穿/强势突破MA20")
+            else:
+                analysis['signals'].append('🟢 MA5在MA20上方延续')
+                analysis['strength'] += 1
+        elif current_diff < 0:
+            if prev_diff >= 0 or (prev_diff < 0 and current_diff < prev_diff * 1.2):
+                # 从上方跌破或显著恶化
+                analysis['signals'].append('🔴 MA5下穿/弱势跌破MA20')
+                analysis['strength'] -= 3
+
+                # print("🔴 MA5下穿/弱势跌破MA20")
+
+            else:
+                analysis['signals'].append('🔴 MA5在MA20下方延续')
+                analysis['strength'] -= 1
+        else:
+            analysis['signals'].append('🟡 MA5与MA20接近')
+
+        # 均线排列判断
+        ma5_above_ma20 = current_diff > 0
+        ma5_above_ma20_prev = prev_diff > 0
+
+        # 如果状态改变
+        if ma5_above_ma20 != ma5_above_ma20_prev:
+            if ma5_above_ma20:
+                analysis['signals'].append('🚀 MA5刚刚突破MA20，趋势转多')
+                analysis['strength'] += 2
+            else:
+                analysis['signals'].append('💀 MA5刚刚跌破MA20，趋势转空')
+                analysis['strength'] -= 2
+
+        return analysis
+
+    def _analyze_support_resistance_breakthrough(self):
+        """分析支撑位和阻力位的突破情况"""
+        analysis = {
+            'support_break': {'status': None, 'level': None, 'strength': 0},
+            'resistance_break': {'status': None, 'level': None, 'strength': 0},
+            'key_levels': {'support': [], 'resistance': []}
+        }
+
+        # 获取支撑阻力位
+        sr = self._identify_support_resistance()
+        analysis['key_levels']['support'] = sr['support']
+        analysis['key_levels']['resistance'] = sr['resistance']
+
+        # 当前价格和近期价格
+        current_price = self.df['收盘'].iloc[-1]
+        prev_price = self.df['收盘'].iloc[-2]
+        recent_low = self.df['最低'].tail(5).min()
+        recent_high = self.df['最高'].tail(5).max()
+        # import pdb;pdb.set_trace()
+        # 分析支撑位突破
+        if sr['support']:
+            for support_level in sr['support']:
+                # 检查是否跌破支撑位（收盘价低于支撑位）
+                if current_price < support_level and prev_price >= support_level:
+                    analysis['support_break']['status'] = '跌破'
+                    analysis['support_break']['level'] = support_level
+                    analysis['support_break']['strength'] = 2  # 负向信号
+                    break
+                # 检查是否回踩支撑位
+                elif current_price > support_level and recent_low <= support_level * 1.01:
+                    analysis['support_break']['status'] = '回踩'
+                    analysis['support_break']['level'] = support_level
+                    analysis['support_break']['strength'] = -1  # 正向信号
+                    break
+                # 检查是否在支撑位附近获得支撑
+                elif current_price > support_level and current_price <= support_level * 1.02:
+                    analysis['support_break']['status'] = '获得支撑'
+                    analysis['support_break']['level'] = support_level
+                    analysis['support_break']['strength'] = -2  # 正向信号
+                    break
+
+        # 分析阻力位突破
+        if sr['resistance']:
+            for resistance_level in sr['resistance']:
+                # 检查是否突破阻力位（收盘价高于阻力位）
+                if current_price > resistance_level and prev_price <= resistance_level:
+                    analysis['resistance_break']['status'] = '突破'
+                    analysis['resistance_break']['level'] = resistance_level
+                    analysis['resistance_break']['strength'] = -2  # 负向信号（对空头）
+                    break
+                # 检查是否测试阻力位
+                elif current_price < resistance_level and recent_high >= resistance_level * 0.99:
+                    analysis['resistance_break']['status'] = '测试阻力'
+                    analysis['resistance_break']['level'] = resistance_level
+                    analysis['resistance_break']['strength'] = 1  # 负向信号
+                    break
+                # 检查是否在阻力位附近受阻
+                elif current_price < resistance_level and current_price >= resistance_level * 0.98:
+                    analysis['resistance_break']['status'] = '受阻回落'
+                    analysis['resistance_break']['level'] = resistance_level
+                    analysis['resistance_break']['strength'] = 2  # 负向信号
+                    break
+
+        return analysis
+
     def get_trading_advice1(self):
         """生成更复杂的交易建议"""
         signals = self.analyze_trading_signals()
         latest_date = self.df.index[-1]
+        # import pdb;pdb.set_trace()
 
         # 1. 价格趋势分析
         price_trend = self._analyze_price_trend()
 
         # 2. 成交量分析
         volume_analysis = self._analyze_volume()
+        # import pdb;pdb.set_trace()
 
         # 3. 技术指标综合分析
         technical_analysis = self._analyze_technical_indicators()
@@ -412,6 +691,15 @@ class StockAnalyzer:
         # 4. 形态识别
         pattern_analysis = self._analyze_patterns()
 
+        # # 5. 支撑阻力位突破分析
+        # breakthrough_analysis = self._analyze_support_resistance_breakthrough()
+        # if breakthrough_analysis['resistance_break']['status'] == '突破':
+        #     print(f"- 突破重要阻力位")
+        # if breakthrough_analysis['support_break']['status'] == '获得支撑':
+        #     print(f"- 在支撑位获得支撑")
+        # if breakthrough_analysis['support_break']['status'] == '跌破':
+        #     print("- 跌破重要支撑位" )
+        # analysis1 = self.analyze_weekly_moving_averages()
         # 5. 生成综合建议
         return self._generate_comprehensive_advice(
             price_trend, volume_analysis, technical_analysis, pattern_analysis
@@ -446,13 +734,15 @@ class StockAnalyzer:
 
         # 识别支撑位和阻力位
         support_resistance = self._identify_support_resistance()
-
+        # import pdb;pdb.set_trace()
         # 判断趋势
         if trend_strength >= 2:
             analysis['trend'] = '上升'
             analysis['strength'] = abs(trend_strength)
         elif trend_strength <= -2:
             analysis['trend'] = '下降'
+            analysis['strength'] = trend_strength
+            # analysis['strength'] = abs(trend_strength)
             analysis['strength'] = trend_strength
         else:
             analysis['trend'] = '震荡'
@@ -466,8 +756,9 @@ class StockAnalyzer:
     def _analyze_volume(self):
         """分析成交量"""
         df = self.df
+        # import pdb;pdb.set_trace()
         current_volume = df['成交量'].iloc[-1]
-
+        # import pdb;pdb.set_trace()
         analysis = {
             'volume_trend': None,
             'volume_signal': None,
@@ -619,7 +910,8 @@ class StockAnalyzer:
                 technical_analysis['strength'] +
                 pattern_analysis['strength']
         )
-
+        # print("total_strength:", total_strength)
+        # import pdb;pdb.set_trace()
         advice += "\n【交易建议】\n"
         if total_strength >= 3:
             advice += "强烈买入信号\n"

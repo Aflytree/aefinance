@@ -1,3 +1,5 @@
+from gc import enable
+
 import technical_indicator_analysis
 import logging
 import util
@@ -16,9 +18,14 @@ def backtest_strategy(stock_code,
     :return: 回测结果
     """
     try:
+        # import pdb;pdb.set_trace()
+
         # 使用 StockAnalyzer 类获取数据和计算指标
         analyzer = technical_indicator_analysis.StockAnalyzer(stock_code=stock_code, beg= bg)
         df = analyzer.df
+        weekly_df = analyzer.weekly_df
+
+        # import pdb;pdb.set_trace()
 
         if df.empty:
             print(f"未获取到股票 {stock_code} 的历史数据")
@@ -45,22 +52,36 @@ def backtest_strategy(stock_code,
         max_consecutive_stop_loss = 3
         # 计算波动率指标 (提前计算)
         df['volatility'] = (df['最高'] - df['最低']).rolling(14).mean() / df['收盘']
+
         # 跳过前20天，确保有足够数据计算指标
         for i in range(20, len(df)):
             try:
                 # 更新分析器的数据窗口
                 analyzer.df = df[i - 20:i + 1]
+                # analyzer.weekly_df = weekly_df[i - 20:i + 1]
                 date = df.index[i]
                 current_price = df['收盘'].iloc[i]
+                # print("date:", date)
                 # 获取交易建议
                 advice = analyzer.get_trading_advice1()
-                # import pdb;pdb.set_trace()
+
                 buy_signal, sell_signal = util.parse_trading_signals(advice)
 
                 # 交易逻辑
                 if position == 0:  # 没有持仓
                     if buy_signal >= 2 :  # 至少达到有效买入信号
                         # position_size = util.calculate_position_size(capital, current_price, df['volatility'].illoc[i])
+                        # 获取周线分析（传入当前日期）
+                        weekly_analysis = analyzer.analyze_weekly_moving_averages(date)
+                        weekly_advice = ""
+                        enable_weekly5_10_20_threadhold = True
+                        if enable_weekly5_10_20_threadhold:
+                            if weekly_analysis['current_values']['MA5'] > weekly_analysis['current_values']['MA20'] and weekly_analysis['current_values']['MA5'] > weekly_analysis['current_values']['MA10'] :
+                                weekly_advice += '五周线在20/10周线上方'
+                                # import pdb;pdb.set_trace()
+                            else:
+                                continue
+
                         buy_trades_holdings.append(
                             {
                                 'date': date,
@@ -68,11 +89,12 @@ def backtest_strategy(stock_code,
                                 'price': current_price,
                                 'quantity': position,
                                 'advice': advice,
-                                'reason': '：\n- ' + '\n- '.join("xxx")
+                                'reason': '：\n- ' + '\n- '.join(advice)
                             }
                         )
+
                         logging.debug(f"[执行买入] buy_signal {buy_signal} ")
-                        position = int(capital / current_price)  # 全仓买入
+                        position = int(capital / current_price) # 全仓买入
                         entry_price = current_price
                         capital -= position * current_price
                         trades.append({
@@ -82,7 +104,7 @@ def backtest_strategy(stock_code,
                             'quantity': position,
                             'signals': buy_signal,
                             'advice': advice,
-                            'reason': buy_signal
+                            'reason': ''.join(weekly_advice)
                         })
                         holding_days = 0
                 elif position > 0:  # 持有仓位
@@ -94,7 +116,7 @@ def backtest_strategy(stock_code,
                             'price': current_price,
                             'quantity': position,
                             'advice': advice,
-                            'reason': ''.join("xxx")
+                            'reason': ''.join(advice)
                         })
 
                     holding_days += 1
@@ -120,8 +142,8 @@ def backtest_strategy(stock_code,
                         logging.debug(f"[普通止损] 触发止损：亏损{current_return * 100:.2f}%")
                     elif current_return >= target_return:
                         sell_reason.append(f"达到目标收益：{current_return * 100:.2f}%")
-                    elif sell_signal >= 1 and holding_days > 5:
-                        sell_reason.append("出现强烈卖出信号且持有超过5天")
+                    # elif sell_signal >= 4 and holding_days > 7:
+                    #     sell_reason.append("出现强烈卖出信号且持有超过5天")
                     if sell_reason:
                         # 计算当前资本 - 使用实际卖出价格
                         current_capital = capital + position * actual_sell_price
