@@ -24,7 +24,7 @@ def efi_backtesting():
                                                 '002361']))
         #20251029 add
         stock_codes = list(set(stock_codes + ['600415', '002278', '600689', '603336', '603839','603336']))
-        # stock_codes = ['600689']
+        # stock_codes = ['600397', '603336','002379', '603881', '002448', '600689','600415','600539', '603839', ]
         # stock_codes, day_dragons = util.get_dragon_tiger_stocks(date="20251022")
         # stock_codes = util.get_recent_days_lhb_stocks(days=120)
         all_results = []
