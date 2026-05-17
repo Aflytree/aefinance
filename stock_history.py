@@ -8,10 +8,36 @@ import efinance as ef
 import  random
 import  time
 import akshare as ak
+
+# Baostock 底层 recv 无超时，网络挂起时会永久阻塞；对 default_socket 设置读超时（秒）
+DEFAULT_BAOSTOCK_RECV_TIMEOUT = 90.0
+
+
+def apply_baostock_socket_timeout(seconds: float = DEFAULT_BAOSTOCK_RECV_TIMEOUT) -> None:
+    """为当前 Baostock 会话的 socket 设置读超时，避免单次请求无限等待。"""
+    try:
+        from baostock.common import context as bs_ctx
+
+        sock_obj = getattr(bs_ctx, "default_socket", None)
+        if sock_obj is not None and hasattr(sock_obj, "settimeout"):
+            sock_obj.settimeout(float(seconds))
+    except Exception:
+        pass
+
+
 ############################################################################
 #baostock
 ############################################################################
-def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1', day_or_week= "d"):
+def get_quote_history_baostock(
+    stock_code,
+    beg=None,
+    end=None,
+    klt="101",
+    fqt="1",
+    day_or_week="d",
+    manage_login=True,
+    verbose=True,
+):
     """
     仿照 efinance 接口的 Baostock 数据获取函数
     参数:
@@ -48,14 +74,16 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
     adjustflag_map = {'1': '2', '2': '1', '0': '3'}  # efinance 到 baostock 的映射
     adjustflag = adjustflag_map.get(fqt, '2')  # 默认前复权
 
-    # 登录系统
-    lg = bs.login()
-    if lg.error_code != '0':
-        print(f'Baostock登录失败: {lg.error_msg}')
-        return None
+    if manage_login:
+        lg = bs.login()
+        if lg.error_code != "0":
+            print(f"Baostock登录失败: {lg.error_msg}")
+            return None
 
     try:
-        print(f"使用 Baostock 获取 {bs_code} 的数据 ({start_date} 到 {end_date})...")
+        apply_baostock_socket_timeout()
+        if verbose:
+            print(f"使用 Baostock 获取 {bs_code} 的数据 ({start_date} 到 {end_date})...")
 
         # 获取沪深A股历史K线数据
         rs = bs.query_history_k_data_plus(
@@ -67,8 +95,9 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
             adjustflag=adjustflag  # 复权类型
         )
 
-        if rs.error_code != '0':
-            print(f'Baostock查询失败: {rs.error_msg}')
+        if rs.error_code != "0":
+            if verbose:
+                print(f"Baostock查询失败: {rs.error_msg}")
             return None
 
         # 处理数据
@@ -77,7 +106,8 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
             data_list.append(rs.get_row_data())
 
         if not data_list:
-            print("Baostock 返回数据为空")
+            if verbose:
+                print("Baostock 返回数据为空")
             return None
 
         # 转换为DataFrame
@@ -120,15 +150,17 @@ def get_quote_history_baostock(stock_code, beg=None, end=None, klt='101', fqt='1
 
         df = df[efinance_columns]
 
-        print(f"成功获取 {len(df)} 条数据")
+        if verbose:
+            print(f"成功获取 {len(df)} 条数据")
         return df
 
     except Exception as e:
-        print(f"Baostock 获取数据失败: {e}")
+        if verbose:
+            print(f"Baostock 获取数据失败: {e}")
         return None
     finally:
-        # 退出系统
-        bs.logout()
+        if manage_login:
+            bs.logout()
 
 
 # 使用示例 - 支持 '000875' 格式
@@ -207,6 +239,7 @@ def get_weekly_data_baostock(self):
     try:
         # 登陆系统
         lg = bs.login()
+        apply_baostock_socket_timeout()
 
         # 获取周线数据
         rs = bs.query_history_k_data_plus(
