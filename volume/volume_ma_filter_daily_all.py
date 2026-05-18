@@ -29,6 +29,7 @@ from common import (
     describe_signal_dedupe_rule,
     export_forward_result,
     format_filter_conditions_line,
+    format_forward_summary,
     fetch_stock_df,
     get_signal_forward_returns,
     normalize_stock_code,
@@ -305,6 +306,12 @@ def send_reports_email(
     report_daily = _root / f"volume_ma_filter_daily_all_{tag}.txt"
     report_last_week = _root / f"volume_ma_filter_daily_all_lastweek_{tag}.txt"
     report_3y = _root / f"volume_ma_filter_daily_all_3y_{tag}.txt"
+    signal_hits_reports = sorted(
+        _root.glob(f"volume_ma_filter_daily_all_signal_hits_*y_{tag}.txt")
+    )
+    report_signal_hits_fwd = (
+        signal_hits_reports[-1] if signal_hits_reports else None
+    )
 
     if not report_daily.is_file():
         print(f"未找到当日报告，无法发信: {report_daily}", flush=True)
@@ -317,6 +324,13 @@ def send_reports_email(
     if report_last_week.is_file():
         email_parts.append("\n\n---\n" + report_last_week.read_text(encoding="utf-8"))
         attach.append(report_last_week)
+
+    if report_signal_hits_fwd is not None and report_signal_hits_fwd.is_file():
+        email_parts.append(
+            "\n\n---\n"
+            + report_signal_hits_fwd.read_text(encoding="utf-8")
+        )
+        attach.append(report_signal_hits_fwd)
 
     if report_3y.is_file():
         email_parts.append(
@@ -340,6 +354,109 @@ def send_reports_email(
     print(f"正在发送邮件（附件 {len(attach)} 个）...", flush=True)
     send_result_email("".join(email_parts), attachment_paths=attach)
     print("邮件已发送。", flush=True)
+
+
+def export_signal_day_hits_forward_report(
+    hits: List[Dict[str, Any]],
+    threshold: float,
+    pre20_max_pct: float,
+    history_years: int,
+    output_path: Path,
+    *,
+    signal_day: date | None = None,
+) -> Tuple[Optional[Path], List[str]]:
+    """
+    对信号日命中股票做与 volume_ma_filter_detail 一致的前瞻统计（近 history_years 年），
+    写入 export_forward_result 版式 txt，并返回各股文字摘要供邮件正文使用。
+    """
+    signal_day = signal_day or datetime.now().date()
+    header = (
+        f"=== 信号日（{signal_day}）命中股票 — 近{history_years}年前瞻 ===\n"
+        f"命中股数: {len({normalize_stock_code(h['股票代码']) for h in hits})}\n"
+    )
+    if not hits:
+        output_path.write_text(
+            header + "\n无当日命中股票，无前瞻明细。\n",
+            encoding="utf-8",
+        )
+        return output_path, []
+
+    codes: List[str] = []
+    seen: set[str] = set()
+    for h in hits:
+        code = normalize_stock_code(h["股票代码"])
+        if code not in seen:
+            seen.add(code)
+            codes.append(code)
+    codes.sort()
+
+    lg = bs.login()
+    if lg.error_code != "0":
+        print(f"信号日命中股前瞻 Baostock 登录失败: {lg.error_msg}", flush=True)
+        return None, []
+
+    all_detail: List[pd.DataFrame] = []
+    all_summary_rows: List[Dict[str, Any]] = []
+    summary_lines: List[str] = []
+    ok = 0
+    fail = 0
+    try:
+        for k, code in enumerate(codes):
+            if k > 0 and k % 50 == 0:
+                baostock_relogin(verbose=False)
+            print(f"信号日命中股前瞻: {k + 1}/{len(codes)} {code}", flush=True)
+            detail_df = pd.DataFrame()
+            for attempt in range(FETCH_MAX_RETRIES + 1):
+                try:
+                    detail_df = get_signal_forward_returns(
+                        code,
+                        threshold,
+                        history_years,
+                        pre20_max_pct,
+                        baostock_manage_login=False,
+                        baostock_verbose=False,
+                    )
+                    break
+                except Exception as e:
+                    if attempt < FETCH_MAX_RETRIES:
+                        baostock_relogin(verbose=False)
+                    else:
+                        print(f"信号日命中股前瞻 {code} 失败: {e}", flush=True)
+            if detail_df.empty:
+                fail += 1
+                summary_lines.append(f"{code} 最近{history_years}年无可用信号数据。")
+                continue
+            ok += 1
+            all_detail.append(detail_df)
+            all_summary_rows.extend(
+                build_summary_rows(detail_df, code, threshold, history_years)
+            )
+            summary_lines.append(
+                format_forward_summary(detail_df, code, threshold, history_years)
+            )
+    finally:
+        bs.logout()
+
+    print(
+        f"信号日命中股前瞻统计: 有样本 {ok} 只, 无样本或失败 {fail} 只",
+        flush=True,
+    )
+
+    if not all_detail:
+        output_path.write_text(
+            header + "\n=== 前瞻统计汇总 ===\n无汇总数据\n\n=== 前瞻统计明细 ===\n无明细数据\n",
+            encoding="utf-8",
+        )
+        return output_path, summary_lines
+
+    merged_df = pd.concat(all_detail, ignore_index=True)
+    summary_df = pd.DataFrame(all_summary_rows)
+    path = Path(
+        export_forward_result(
+            merged_df, summary_df, str(output_path), strategy_header=header
+        )
+    )
+    return path, summary_lines
 
 
 def export_full_pool_forward_3y_report(
@@ -639,6 +756,32 @@ def _main_body(args: argparse.Namespace) -> None:
         print(f"\n报告（{week_period_label}命中）: {report_week}", flush=True)
 
     history_years = int(args.history_years)
+    report_signal_hits_fwd = (
+        _root / f"volume_ma_filter_daily_all_signal_hits_{history_years}y_{date_tag}.txt"
+    )
+    exported_signal_hits_fwd: Path | None = None
+    signal_hits_fwd_summaries: List[str] = []
+    if hits:
+        print(
+            f"\n开始报告（信号日命中股）: 近 {history_years} 年前瞻（共 {len(hits)} 条命中）...",
+            flush=True,
+        )
+        exported_signal_hits_fwd, signal_hits_fwd_summaries = (
+            export_signal_day_hits_forward_report(
+                hits,
+                threshold,
+                pre20_max_pct,
+                history_years,
+                report_signal_hits_fwd,
+                signal_day=signal_day,
+            )
+        )
+        if exported_signal_hits_fwd:
+            print(
+                f"报告（信号日命中股近{history_years}年前瞻）: {exported_signal_hits_fwd}",
+                flush=True,
+            )
+
     report_forward = _root / f"volume_ma_filter_daily_all_{history_years}y_{date_tag}.txt"
     exported_forward: Path | None = None
     if args.skip_forward_report:
@@ -667,6 +810,13 @@ def _main_body(args: argparse.Namespace) -> None:
             email_parts.append("\n\n---\n" + week_body)
             if report_week is not None:
                 attach.append(report_week)
+    if signal_hits_fwd_summaries:
+        email_parts.append("\n\n---\n" + "\n\n".join(signal_hits_fwd_summaries))
+    if exported_signal_hits_fwd and exported_signal_hits_fwd.is_file():
+        attach.append(exported_signal_hits_fwd)
+        email_parts.append(
+            f"\n信号日命中股近{history_years}年前瞻报告: {exported_signal_hits_fwd}\n"
+        )
     if exported_forward:
         email_parts.append(
             "\n\n---\n"
