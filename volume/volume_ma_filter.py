@@ -16,12 +16,9 @@ from common import (
     DEFAULT_HISTORY_YEARS,
     DEFAULT_PRE20_MAX_PCT,
     DEFAULT_THRESHOLD,
-    MA20_TO_MA5_FACTOR,
-    MA5_TO_MA10_MAX_RATIO,
-    MA5_TO_MA10_MIN_RATIO,
-    MAX_SIGNAL_DAY_PCT_CHG,
-    MIN_SIGNAL_DAY_PCT_CHG,
     build_summary_rows,
+    describe_filter_conditions_bullets,
+    describe_signal_dedupe_rule,
     export_forward_result,
     format_email_body,
     format_forward_summary,
@@ -56,16 +53,9 @@ def build_strategy_export_text(
         "【数据长度】日线至少约 250 根已收盘 K 线（满足价格 MA250 与量能条件）。\n"
         "\n"
         "【信号日】某一交易日同时满足下列全部条件:\n"
-        f"  1) MA10量能 > 0\n"
-        f"  2) MA5量能/MA10量能 > {MA5_TO_MA10_MIN_RATIO} 且 {threshold} <= MA5量能/MA10量能 <= {MA5_TO_MA10_MAX_RATIO}\n"
-        f"  3) MA20量能 < MA5量能 × {MA20_TO_MA5_FACTOR}\n"
-        f"  4) 当天涨跌幅: {MIN_SIGNAL_DAY_PCT_CHG}% < 涨跌幅 < {MAX_SIGNAL_DAY_PCT_CHG}%\n"
-        f"  5) 信号日前20个交易日涨跌幅（收盘/20日前收盘-1）×100 < {pre20_max_pct}%\n"
-        "  6) 当日收盘 > 当日价格MA10（收盘10日均线）\n"
-        "  7) 价格方法1: 价格MA20 > 价格MA30 且 > MA60 且 > MA120 且 > MA250\n"
-        "  8) 价格方法3: 价格MA5 > MA10 > MA20，且 (MA5−MA10) 较上一交易日扩大\n"
+        f"{describe_filter_conditions_bullets(threshold=threshold, pre20_max_pct=pre20_max_pct)}\n"
         "\n"
-        "【样本去重】连续命中仅保留每段第一个交易日。\n"
+        f"【样本去重】{describe_signal_dedupe_rule()}。\n"
         "\n"
     )
 

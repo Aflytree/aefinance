@@ -6,7 +6,7 @@ import pandas as pd
 from stock_history import get_quote_history_baostock
 
 from .data import normalize_stock_code
-from .filter import check_hit_at_row, prepare_ohlcv_df
+from .filter import check_hit_at_row, dedupe_signal_indices, prepare_ohlcv_df
 from .indicators import add_price_macd_columns, macd_value_at
 
 
@@ -38,12 +38,7 @@ def get_signal_forward_returns(
         if check_hit_at_row(data, idx, threshold, pre20_max_pct) is not None:
             signal_idx.append(idx)
 
-    filtered_signal_idx: List[int] = []
-    prev_idx: int | None = None
-    for idx in signal_idx:
-        if prev_idx is None or idx != prev_idx + 1:
-            filtered_signal_idx.append(idx)
-        prev_idx = idx
+    filtered_signal_idx = dedupe_signal_indices(data, signal_idx)
 
     rows: List[Dict[str, Any]] = []
     code = normalize_stock_code(stock_code)

@@ -1,13 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List
 
-from .constants import (
-    MA20_TO_MA5_FACTOR,
-    MA5_TO_MA10_MAX_RATIO,
-    MA5_TO_MA10_MIN_RATIO,
-    MAX_SIGNAL_DAY_PCT_CHG,
-    MIN_SIGNAL_DAY_PCT_CHG,
-)
+from .filter import format_filter_conditions_line
 
 
 def format_email_body(
@@ -16,12 +10,8 @@ def format_email_body(
     pre20_max_pct: float,
 ) -> str:
     date_str = datetime.now().strftime("%Y-%m-%d")
-    cond = (
-        f"条件: MA5量能 >= MA10量能 * {threshold} 且 MA5/MA10 > {MA5_TO_MA10_MIN_RATIO} "
-        f"且 MA5/MA10 <= {MA5_TO_MA10_MAX_RATIO} 且 MA20量能 < MA5量能 * {MA20_TO_MA5_FACTOR} "
-        f"且 当天涨跌幅 > {MIN_SIGNAL_DAY_PCT_CHG}% 且 当天涨跌幅 < {MAX_SIGNAL_DAY_PCT_CHG}% "
-        f"且 信号日前20日涨跌幅 < {pre20_max_pct}% 且 收盘 > 价格MA10 "
-        f"且 方法1(MA20>MA30/60/120/250) 且 方法三(MA5>MA10>MA20且价差扩大)"
+    cond = format_filter_conditions_line(
+        threshold=threshold, pre20_max_pct=pre20_max_pct
     )
     if not results:
         return f"{date_str} 量能筛选结果\n{cond}\n无符合条件股票。"

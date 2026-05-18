@@ -1,8 +1,12 @@
+from datetime import date
 from typing import Any, Dict, List
 
 import pandas as pd
 
 from .constants import (
+    DEFAULT_PRE20_MAX_PCT,
+    DEFAULT_THRESHOLD,
+    HITS_PERIOD_DAYS,
     MA20_TO_MA5_FACTOR,
     MA5_TO_MA10_MAX_RATIO,
     MA5_TO_MA10_MIN_RATIO,
@@ -10,6 +14,60 @@ from .constants import (
     MIN_SIGNAL_DAY_PCT_CHG,
 )
 from .data import fetch_stock_df, normalize_stock_code
+
+
+def describe_method3_condition() -> str:
+    """与 method3_price_ma_bullish_expanding 实际判定一致。"""
+    return "价格method3(价格MA5>价格MA20且MA5-MA10价差较昨日扩大)"
+
+
+def describe_filter_conditions_text(
+    *,
+    threshold: float | None = None,
+    pre20_max_pct: float | None = None,
+) -> str:
+    """从 constants 与 check_hit_at_row / method3 生成筛选条件说明（供邮件/报告引用）。"""
+    th = DEFAULT_THRESHOLD if threshold is None else threshold
+    pre20 = DEFAULT_PRE20_MAX_PCT if pre20_max_pct is None else pre20_max_pct
+    return (
+        f"MA5量能>=MA10量能*{th} 且 MA5/MA10>{MA5_TO_MA10_MIN_RATIO} 且 MA5/MA10<={MA5_TO_MA10_MAX_RATIO} "
+        f"且 MA20量能<MA5*{MA20_TO_MA5_FACTOR} "
+        f"且 当天涨跌幅∈({MIN_SIGNAL_DAY_PCT_CHG},{MAX_SIGNAL_DAY_PCT_CHG})% "
+        f"且 信号日前20日涨跌幅<{pre20}% 且 收盘>价格MA10 且 {describe_method3_condition()}"
+    )
+
+
+def format_filter_conditions_line(
+    *,
+    threshold: float | None = None,
+    pre20_max_pct: float | None = None,
+    label: str = "条件",
+) -> str:
+    return f"{label}: {describe_filter_conditions_text(threshold=threshold, pre20_max_pct=pre20_max_pct)}"
+
+
+def describe_filter_conditions_bullets(
+    *,
+    threshold: float | None = None,
+    pre20_max_pct: float | None = None,
+) -> str:
+    """多行条件说明（前瞻报告头等）。"""
+    th = DEFAULT_THRESHOLD if threshold is None else threshold
+    pre20 = DEFAULT_PRE20_MAX_PCT if pre20_max_pct is None else pre20_max_pct
+    lines = [
+        f"  1) MA10量能 > 0",
+        f"  2) MA5量能/MA10量能 > {MA5_TO_MA10_MIN_RATIO} 且 {th} <= MA5量能/MA10量能 <= {MA5_TO_MA10_MAX_RATIO}",
+        f"  3) MA20量能 < MA5量能 × {MA20_TO_MA5_FACTOR}",
+        f"  4) 当天涨跌幅: {MIN_SIGNAL_DAY_PCT_CHG}% < 涨跌幅 < {MAX_SIGNAL_DAY_PCT_CHG}%",
+        f"  5) 信号日前20个交易日涨跌幅 < {pre20}%",
+        "  6) 当日收盘 > 当日价格MA10（收盘10日均线）",
+        f"  7) {describe_method3_condition()}",
+    ]
+    return "\n".join(lines)
+
+
+def describe_signal_dedupe_rule() -> str:
+    return f"同股任意连续{HITS_PERIOD_DAYS}个自然日内仅保留首次命中"
 
 
 def method3_price_ma_bullish_expanding(df: pd.DataFrame, row_index: int = -1) -> bool:
@@ -45,7 +103,7 @@ def method3_price_ma_bullish_expanding(df: pd.DataFrame, row_index: int = -1) ->
     g1 = gap_yesterday.iloc[row_index]
     if any(pd.isna(v) for v in (p5, p10, p20, p30, p60, p120, p250, g0, g1)):
         return False
-        
+
     ma_order_ok = p5 > p20
     gap_expanding = g0 > g1
     return bool(ma_order_ok and gap_expanding)
@@ -116,6 +174,49 @@ def check_hit_at_row(
         "当天涨跌幅%": day_pct_chg,
         "信号日前20日涨跌幅%": pre20_pct_chg,
     }
+
+
+def parse_hit_date(value: Any) -> date:
+    if isinstance(value, date):
+        return value
+    return pd.to_datetime(value).date()
+
+
+def dedupe_hits_first_within_days(
+    hits: List[Dict[str, Any]],
+    *,
+    period_days: int = HITS_PERIOD_DAYS,
+) -> List[Dict[str, Any]]:
+    """每只股票在任意连续 period_days 个自然日内只保留首次命中。"""
+    kept: List[Dict[str, Any]] = []
+    last_kept_date: Dict[str, date] = {}
+    for h in sorted(hits, key=lambda x: (parse_hit_date(x["日期"]), x["股票代码"])):
+        code = h["股票代码"]
+        d = parse_hit_date(h["日期"])
+        prev = last_kept_date.get(code)
+        if prev is not None and (d - prev).days < period_days:
+            continue
+        kept.append(h)
+        last_kept_date[code] = d
+    return kept
+
+
+def dedupe_signal_indices(
+    data: pd.DataFrame,
+    indices: List[int],
+    *,
+    period_days: int = HITS_PERIOD_DAYS,
+) -> List[int]:
+    """单股信号行 index：任意连续 period_days 个自然日内只保留首次。"""
+    kept: List[int] = []
+    last_date: date | None = None
+    for idx in sorted(indices):
+        d = parse_hit_date(data.loc[idx, "日期"])
+        if last_date is not None and (d - last_date).days < period_days:
+            continue
+        kept.append(idx)
+        last_date = d
+    return kept
 
 
 def screen_by_volume_ma(

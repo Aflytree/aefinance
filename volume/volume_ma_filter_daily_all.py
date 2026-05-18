@@ -20,14 +20,15 @@ from common import (
     DEFAULT_HISTORY_YEARS,
     DEFAULT_PRE20_MAX_PCT,
     DEFAULT_THRESHOLD,
-    MA20_TO_MA5_FACTOR,
-    MA5_TO_MA10_MAX_RATIO,
-    MA5_TO_MA10_MIN_RATIO,
-    MAX_SIGNAL_DAY_PCT_CHG,
-    MIN_SIGNAL_DAY_PCT_CHG,
+    HITS_PERIOD_DAYS,
+    HITS_RANGE_END,
+    HITS_RANGE_START,
     build_summary_rows,
     check_hit_at_row,
+    dedupe_hits_first_within_days,
+    describe_signal_dedupe_rule,
     export_forward_result,
+    format_filter_conditions_line,
     fetch_stock_df,
     get_signal_forward_returns,
     normalize_stock_code,
@@ -74,6 +75,7 @@ def get_mainboard_stock_pool() -> pd.DataFrame:
 
     # 两市主板：沪市主板(600/601/603/605)、深市主板(000/001/002/003)
     mainboard_prefix = ("600", "601", "603", "605", "000", "001", "002", "003")
+    # mainboard_prefix = ("600")
     df = df[df["代码"].astype(str).str.startswith(mainboard_prefix)].copy()
 
     # 剔除 ST、*ST、退市风险股票；创业板(300)已通过前缀排除
@@ -91,33 +93,65 @@ def _prepare_ohlcv_df_with_date(df: pd.DataFrame) -> pd.DataFrame | None:
     return data
 
 
+def get_market_latest_trading_day(ref: datetime | None = None) -> date:
+    """以沪指样本股最新 K 线日期作为全市场信号交易日（非交易日则自然落到最近交易日）。"""
+    ref = ref or datetime.now()
+    raw = fetch_stock_df(
+        "000001",
+        baostock_manage_login=False,
+        baostock_verbose=False,
+    )
+    data = _prepare_ohlcv_df_with_date(raw)
+    if data is None or data.empty:
+        return ref.date()
+    return data["_日期"].iloc[-1]
+
+
+def check_hit_on_signal_day(
+    data: pd.DataFrame,
+    signal_day: date,
+    threshold: float,
+    pre20_max_pct: float,
+) -> Dict[str, Any] | None:
+    """指定信号交易日是否命中（该股当日无 K 线则视为未命中）。"""
+    rows = data.index[data["_日期"] == signal_day]
+    if len(rows) == 0:
+        return None
+    return check_hit_at_row(data, int(rows[-1]), threshold, pre20_max_pct)
+
+
 def is_hit_today(df: pd.DataFrame, threshold: float, pre20_max_pct: float) -> Dict[str, Any] | None:
-    """最近一根已收盘 K 线是否命中。"""
+    """信号交易日是否命中（当日非交易日则用最近交易日）。"""
     data = _prepare_ohlcv_df_with_date(df)
     if data is None:
         return None
-    return check_hit_at_row(data, len(data) - 1, threshold, pre20_max_pct)
+    signal_day = get_market_latest_trading_day()
+    return check_hit_on_signal_day(data, signal_day, threshold, pre20_max_pct)
 
 
-def get_current_calendar_week_range(
+def get_current_period_range(
     ref: datetime | None = None,
+    *,
+    period_days: int = HITS_PERIOD_DAYS,
 ) -> Tuple[date, date]:
-    """本自然周（周一至周日）。"""
+    """最近 period_days 个自然日（含参考日）。"""
     ref = ref or datetime.now()
-    this_monday = ref.date() - timedelta(days=ref.weekday())
-    this_sunday = this_monday + timedelta(days=6)
-    return this_monday, this_sunday
+    end = ref.date()
+    start = end - timedelta(days=period_days - 1)
+    return start, end
 
 
-def get_previous_calendar_week_range(
+def get_previous_period_range(
     ref: datetime | None = None,
+    *,
+    period_days: int = HITS_PERIOD_DAYS,
 ) -> Tuple[date, date]:
-    """上一自然周（周一至周日）。"""
+    """紧邻其前的 period_days 个自然日。"""
     ref = ref or datetime.now()
-    this_monday = ref.date() - timedelta(days=ref.weekday())
-    last_monday = this_monday - timedelta(days=7)
-    last_sunday = last_monday + timedelta(days=6)
-    return last_monday, last_sunday
+    cur_start, _ = get_current_period_range(ref, period_days=period_days)
+    end = cur_start - timedelta(days=1)
+    start = end - timedelta(days=period_days - 1)
+    return start, end
 
 
 def scan_last_week_hits(
@@ -127,8 +161,8 @@ def scan_last_week_hits(
     *,
     baostock_manage_login: bool = False,
 ) -> Tuple[List[Dict[str, Any]], date, date]:
-    """扫描池内每只股票在上一自然周内的全部命中。"""
-    week_start, week_end = get_previous_calendar_week_range()
+    """扫描池内每只股票在前一统计周期（7 自然日）内的全部命中。"""
+    week_start, week_end = get_previous_period_range()
     hits: List[Dict[str, Any]] = []
     n = len(pool_df)
     for k, (_, row) in enumerate(pool_df.iterrows()):
@@ -151,7 +185,7 @@ def scan_last_week_hits(
             hit["股票名称"] = name
             hits.append(hit)
     hits.sort(key=lambda x: (x["日期"], x["股票代码"]))
-    return hits, week_start, week_end
+    return dedupe_hits_first_within_days(hits), week_start, week_end
 
 
 def build_email_body(
@@ -159,16 +193,15 @@ def build_email_body(
     threshold: float,
     pre20_max_pct: float,
     total_count: int,
+    *,
+    signal_day: date | None = None,
 ) -> str:
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    signal_day = signal_day or datetime.now().date()
     lines = [
-        f"{date_str} 日终量能筛选（全市场主板，剔除ST，排除创业板；逻辑同 volume_ma_filter_detail）",
+        f"{signal_day} 日终量能筛选（信号交易日；全市场主板，剔除ST，排除创业板；逻辑同 volume_ma_filter_detail）",
         f"扫描范围: {total_count} 只",
-        (
-            f"条件: MA5量能>=MA10量能*{threshold} 且 MA5/MA10>{MA5_TO_MA10_MIN_RATIO} 且 MA5/MA10<={MA5_TO_MA10_MAX_RATIO} "
-            f"且 MA20量能<MA5量能*{MA20_TO_MA5_FACTOR} 且 当天涨跌幅>{MIN_SIGNAL_DAY_PCT_CHG}% "
-            f"且 当天涨跌幅<{MAX_SIGNAL_DAY_PCT_CHG}% 且 信号日前20日涨跌幅<{pre20_max_pct}% "
-            f"且 收盘>价格MA10 且 方法1(MA20>MA30/60/120/250) 且 方法三(MA5>MA10>MA20且价差扩大)"
+        format_filter_conditions_line(
+            threshold=threshold, pre20_max_pct=pre20_max_pct
         ),
         f"命中数量: {len(hits)}",
         "",
@@ -194,15 +227,14 @@ def build_week_hits_email_body(
     period_label: str = "上周",
 ) -> str:
     lines = [
-        f"{period_label}量能命中（{week_start} ~ {week_end}，自然周周一至周日内的交易日）",
+        f"{period_label}量能命中（{week_start} ~ {week_end}，最近{HITS_PERIOD_DAYS}个自然日内的交易日）",
         f"扫描范围: {total_count} 只（全市场主板，剔除ST）",
-        (
-            f"条件同当日筛: MA5/MA10∈[{threshold},{MA5_TO_MA10_MAX_RATIO}] "
-            f"且 MA20量能<MA5*0.9 且 涨跌幅∈({MIN_SIGNAL_DAY_PCT_CHG},{MAX_SIGNAL_DAY_PCT_CHG})% "
-            f"且 前20日涨跌幅<{pre20_max_pct}% 且 收盘>价格MA10 且 方法1+方法3"
+        format_filter_conditions_line(
+            threshold=threshold,
+            pre20_max_pct=pre20_max_pct,
+            label="条件同当日筛",
         ),
-        f"命中条数: {len(hits)}（同一股票可多日命中）",
-        f"涉及股票数: {len({h['股票代码'] for h in hits})}",
+        f"命中数量: {len(hits)}（{describe_signal_dedupe_rule()}）",
         "",
     ]
     if not hits:
@@ -409,12 +441,12 @@ def main() -> None:
     parser.add_argument(
         "--last-week-hits",
         action="store_true",
-        help="额外扫描上一自然周（周一至周日）内所有命中，输出命中日期与明细",
+        help="额外扫描上一统计周期内的命中（周期见 common.constants.HITS_PERIOD_DAYS）",
     )
     parser.add_argument(
         "--this-week-hits",
         action="store_true",
-        help="额外扫描本自然周（周一至周日）内所有命中，输出命中日期与明细",
+        help="额外扫描最近一个统计周期内的命中（周期见 common.constants.HITS_PERIOD_DAYS）",
     )
     parser.add_argument(
         "--no-send-email",
@@ -485,6 +517,16 @@ def _main_body(args: argparse.Namespace) -> None:
         print(f"Baostock 登录失败: {lg.error_msg}")
         return
 
+    signal_day = get_market_latest_trading_day()
+    calendar_today = datetime.now().date()
+    if signal_day != calendar_today:
+        print(
+            f"今日({calendar_today})无行情或非交易日，信号日取最近交易日: {signal_day}",
+            flush=True,
+        )
+    else:
+        print(f"信号交易日: {signal_day}", flush=True)
+
     hits: List[Dict[str, Any]] = []
     week_hits: List[Dict[str, Any]] = []
     week_start: date | None = None
@@ -494,11 +536,15 @@ def _main_body(args: argparse.Namespace) -> None:
         print("请只指定 --this-week-hits 或 --last-week-hits 之一。", flush=True)
         return
     if args.this_week_hits:
-        week_start, week_end = get_current_calendar_week_range()
-        week_period_label = "本周"
+        if HITS_RANGE_START is not None and HITS_RANGE_END is not None:
+            week_start, week_end = HITS_RANGE_START, HITS_RANGE_END
+            week_period_label = f"{week_start}~{week_end}"
+        else:
+            week_start, week_end = get_current_period_range()
+            week_period_label = f"近{HITS_PERIOD_DAYS}日"
     elif args.last_week_hits:
-        week_start, week_end = get_previous_calendar_week_range()
-        week_period_label = "上周"
+        week_start, week_end = get_previous_period_range()
+        week_period_label = f"前{HITS_PERIOD_DAYS}日"
     if week_start is not None and week_end is not None:
         print(
             f"{week_period_label}区间: {week_start} ~ {week_end}（将随全池扫描一并统计）",
@@ -524,7 +570,9 @@ def _main_body(args: argparse.Namespace) -> None:
                     fetch_fail += 1
                     continue
                 fetch_ok += 1
-                hit = check_hit_at_row(data, len(data) - 1, threshold, pre20_max_pct)
+                hit = check_hit_on_signal_day(
+                    data, signal_day, threshold, pre20_max_pct
+                )
                 if hit is not None:
                     hit["股票代码"] = code
                     hit["股票名称"] = name
@@ -557,13 +605,14 @@ def _main_body(args: argparse.Namespace) -> None:
     )
 
     hits = sorted(hits, key=lambda x: x["股票代码"])
-    week_hits.sort(key=lambda x: (x["日期"], x["股票代码"]))
+    week_hits = dedupe_hits_first_within_days(week_hits)
     date_tag = datetime.now().strftime("%Y%m%d")
     body = build_email_body(
         hits=hits,
         threshold=threshold,
         pre20_max_pct=pre20_max_pct,
         total_count=len(pool),
+        signal_day=signal_day,
     )
 
     report_daily = _root / f"volume_ma_filter_daily_all_{date_tag}.txt"
@@ -608,12 +657,16 @@ def _main_body(args: argparse.Namespace) -> None:
                 flush=True,
             )
 
-    email_parts = [body]
-    attach: List[Path] = [report_daily]
-    if week_body:
-        email_parts.append("\n\n---\n" + week_body)
-        if report_week is not None:
-            attach.append(report_week)
+    if week_body and args.this_week_hits:
+        email_parts = [week_body]
+        attach = [report_week] if report_week is not None else []
+    else:
+        email_parts = [body]
+        attach = [report_daily]
+        if week_body:
+            email_parts.append("\n\n---\n" + week_body)
+            if report_week is not None:
+                attach.append(report_week)
     if exported_forward:
         email_parts.append(
             "\n\n---\n"

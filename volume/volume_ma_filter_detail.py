@@ -27,7 +27,7 @@ from common import (
     send_result_email,
 )
 
-DEFAULT_STOCK_CODES = ["600601"]
+DEFAULT_STOCK_CODES = ["603336"]
 
 
 def main() -> None:
