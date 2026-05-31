@@ -1,13 +1,129 @@
 import baostock as bs
 import pandas as pd
-
-import baostock as bs
-import pandas as pd
 from datetime import datetime
 import efinance as ef
-import  random
-import  time
+import random
+import socket
+import time
 import akshare as ak
+from urllib.parse import urlparse
+
+_efinance_curl_session_ready = False
+_eastmoney_host_ip_cache: dict[str, str] = {}
+
+
+def _is_dns_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "could not resolve host" in msg
+        or "name or service not known" in msg
+        or "getaddrinfo failed" in msg
+        or "curl: (6)" in msg
+    )
+
+
+def _resolve_host_ip(host: str, port: int = 443) -> str | None:
+    cached = _eastmoney_host_ip_cache.get(host)
+    if cached:
+        return cached
+    try:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        ip = infos[0][4][0]
+        _eastmoney_host_ip_cache[host] = ip
+        return ip
+    except Exception:
+        try:
+            ip = socket.gethostbyname(host)
+            _eastmoney_host_ip_cache[host] = ip
+            return ip
+        except Exception:
+            return None
+
+
+def _warm_eastmoney_dns() -> None:
+    for host in ("push2his.eastmoney.com", "push2.eastmoney.com"):
+        _resolve_host_ip(host)
+
+
+class _CurlCffiSession:
+    """用 curl_cffi 模拟 Chrome TLS 指纹，绕过 push2his 对 Python urllib3 的拦截。"""
+
+    trust_env = False
+    headers = {}
+
+    def get(self, url, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def request(self, method, url, **kwargs):
+        from curl_cffi import requests as curl_requests
+
+        headers = {**self.headers, **kwargs.pop("headers", {})}
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        last_err: Exception | None = None
+        for dns_try in range(3):
+            req_kwargs = {
+                "headers": headers,
+                "timeout": kwargs.get("timeout", 180),
+                "impersonate": "chrome131",
+                "verify": kwargs.get("verify", True),
+                "params": kwargs.get("params"),
+            }
+            if dns_try > 0 and host:
+                _eastmoney_host_ip_cache.pop(host, None)
+                ip = _resolve_host_ip(host, port)
+                if ip:
+                    req_kwargs["resolve"] = [f"{host}:{port}:{ip}"]
+                    print(f"DNS 重试: 使用 {host} -> {ip}")
+                time.sleep(min(2 ** dns_try, 8))
+
+            try:
+                return curl_requests.request(method, url, **req_kwargs)
+            except Exception as e:
+                last_err = e
+                if _is_dns_error(e) and dns_try < 2:
+                    continue
+                raise
+
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError(f"请求失败: {url}")
+
+
+def setup_efinance_curl_session(force: bool = False) -> bool:
+    """将 efinance 底层 session 替换为 curl_cffi，仅需初始化一次。"""
+    global _efinance_curl_session_ready
+    if _efinance_curl_session_ready and not force:
+        return True
+    try:
+        import efinance.shared as ef_shared
+        import efinance.common.getter as ef_getter
+
+        session = _CurlCffiSession()
+        session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+                "Referer": "https://quote.eastmoney.com/",
+                "Accept": "application/json, text/plain, */*",
+            }
+        )
+        ef_shared.session = session
+        ef_getter.session = session
+        _efinance_curl_session_ready = True
+        _warm_eastmoney_dns()
+        return True
+    except ImportError:
+        print("curl_cffi 未安装，efinance 可能无法拉取 push2his 数据；请执行: pip install curl_cffi")
+        return False
+    except Exception as e:
+        print(f"初始化 efinance curl session 失败: {e}")
+        return False
 
 # Baostock 底层 recv 无超时，网络挂起时会永久阻塞；对 default_socket 设置读超时（秒）
 DEFAULT_BAOSTOCK_RECV_TIMEOUT = 90.0
@@ -277,25 +393,31 @@ def get_weekly_data_baostock(self):
         return None
 
 def get_stock_data_with_retry(stock_code, beg, end, max_retries=5):
+    setup_efinance_curl_session()
     for attempt in range(max_retries):
         try:
-            # 添加随机延时避免请求过快
             if attempt > 0:
                 wait_time = (2 ** attempt) + random.random()
                 print(f"第{attempt}次重试，等待{wait_time:.2f}秒...")
                 time.sleep(wait_time)
+                if attempt >= 2:
+                    setup_efinance_curl_session(force=True)
 
+            time.sleep(random.uniform(0.3, 0.8))
             df = ef.stock.get_quote_history(
                 stock_code,
                 beg=beg,
                 end=end,
-                # 可以尝试设置超时，但efinance可能不支持直接设置
             )
-            return df
+            if df is not None and not df.empty:
+                return df
+            print(f"{stock_code} 返回空数据")
 
         except Exception as e:
             print(f"第{attempt + 1}次尝试失败: {e}")
-            if attempt == max_retries - 1:
-                print("所有重试次数已用尽")
-                return None
+            if _is_dns_error(e):
+                _eastmoney_host_ip_cache.clear()
+                _warm_eastmoney_dns()
+
+    print("所有重试次数已用尽")
     return None

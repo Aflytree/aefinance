@@ -75,7 +75,7 @@ class StockAnalyzer:
         # 提前10个月获取数据
         extended_beg = (beg_date - relativedelta(months=10)).strftime('%Y%m%d')
 
-        print(f"📅 获取周线数据：")
+        print("获取周线数据：")
         print(f"  请求日期: {beg} 到 {end}")
         print(f"  实际获取: {extended_beg} 到 {end}（提前10个月）")
 
@@ -84,7 +84,7 @@ class StockAnalyzer:
         )
 
         if weekly_df is None or weekly_df.empty:
-            print("⚠️  未能获取周线数据")
+            print("警告: 未能获取周线数据")
             return None
 
         # 确保日期列存在并转换为datetime
@@ -92,12 +92,12 @@ class StockAnalyzer:
             weekly_df['日期'] = pd.to_datetime(weekly_df['日期'])
             weekly_df.set_index('日期', inplace=True)
 
-        print(f"✅ 周线数据获取完成: {len(weekly_df)} 周")
+        print(f"周线数据获取完成: {len(weekly_df)} 周")
         print(f"   实际日期范围: {weekly_df.index[0]} 到 {weekly_df.index[-1]}")
 
         # 验证数据量
         if len(weekly_df) < 20:
-            print(f"⚠️  警告：只有{len(weekly_df)}周数据，至少需要20周计算MA20")
+            print(f"警告: 只有{len(weekly_df)}周数据，至少需要20周计算MA20")
 
         return weekly_df
 
@@ -123,8 +123,9 @@ class StockAnalyzer:
         # 这里可以选择是使用akshare, efinance还是 baostock
         ############################################################################
         df = stock_history.get_stock_data_with_retry(self.stock_code, self.beg, self.end)
-        # df = get_stock_data_akshare(self.stock_code, self.beg, self.end)
-        # df = stock_history.get_quote_history_baostock(self.stock_code, self.beg, self.end)
+        if df is None or df.empty:
+            print(f"未能获取股票 {self.stock_code} 的历史数据")
+            return pd.DataFrame()
         print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
@@ -462,7 +463,7 @@ class StockAnalyzer:
 
         # 确保weekly_df有正确的日期索引
         if not isinstance(self.weekly_df.index, pd.DatetimeIndex):
-            print("⚠️  周线数据索引不是日期类型，尝试修复...")
+            print("警告: 周线数据索引不是日期类型，尝试修复...")
             # 尝试找到日期列
             for col in self.weekly_df.columns:
                 if '日期' in str(col).lower() or 'date' in str(col).lower():
