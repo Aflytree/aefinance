@@ -79,8 +79,8 @@ def backtest_strategy(stock_code,
                             if weekly_analysis['current_values']['MA5'] > weekly_analysis['current_values']['MA20'] and weekly_analysis['current_values']['MA5'] > weekly_analysis['current_values']['MA10'] :
                                 weekly_advice += '五周线在20/10周线上方'
                                 # import pdb;pdb.set_trace()
-                            else:
-                                continue
+                            # else:
+                            #     continue
 
                         buy_trades_holdings.append(
                             {

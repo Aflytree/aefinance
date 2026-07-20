@@ -392,7 +392,57 @@ def get_weekly_data_baostock(self):
         print(f"baostock获取周线数据失败: {e}")
         return None
 
-def get_stock_data_with_retry(stock_code, beg, end, max_retries=5):
+def _latest_bar_date(df):
+    if df is None or df.empty or "日期" not in df.columns:
+        return None
+    try:
+        return pd.to_datetime(df["日期"]).max().date()
+    except Exception:
+        return None
+
+
+def _is_after_a_share_close(now: datetime | None = None) -> bool:
+    """A股常规收盘后（含清理缓冲），日线才较完整。"""
+    now = now or datetime.now()
+    return now.hour > 15 or (now.hour == 15 and now.minute >= 10)
+
+
+def _accept_daily_bar(df, stock_code: str, source: str) -> bool:
+    """
+    efinance：盘中通常已有当日未收盘K，可直接用。
+    akshare hist / baostock：官方/实际都是日频盘后更新，盘中缺当日则不能当“今日信号”数据源。
+    """
+    latest = _latest_bar_date(df)
+    today = datetime.now().date()
+    print(f"{stock_code} {source} 最新K线: {latest}")
+    if latest is None:
+        return False
+    if latest >= today:
+        return True
+    if today.weekday() >= 5:
+        # 周末用最近交易日即可
+        return True
+    if not _is_after_a_share_close():
+        print(
+            f"拒绝 {source}: 当前盘中/早盘，无当日K线(最新 {latest})，"
+            f"不可用于今日买卖判定"
+        )
+        return False
+    print(
+        f"警告: {source} 收盘后仍缺当日K线(最新 {latest})，"
+        f"今日信号可能无法判定"
+    )
+    # 收盘后仍缺当日：不当作成功（避免 silent 用昨日报今日）
+    return False
+
+
+def get_stock_data_with_retry(stock_code, beg, end, max_retries=3):
+    """
+    日线获取策略（针对“要含当日交易日”的场景）：
+    1) efinance：盘中即可带出当日K，作主源并多试几次
+    2) akshare stock_zh_a_hist：文档写明“当日收盘价请在收盘后获取”，盘中一般无当日
+    3) baostock：盘中无实时日线，仅盘后；盘中缺当日一律不用
+    """
     setup_efinance_curl_session()
     for attempt in range(max_retries):
         try:
@@ -410,8 +460,11 @@ def get_stock_data_with_retry(stock_code, beg, end, max_retries=5):
                 end=end,
             )
             if df is not None and not df.empty:
-                return df
-            print(f"{stock_code} 返回空数据")
+                if _accept_daily_bar(df, stock_code, "efinance"):
+                    return df
+                print(f"{stock_code} efinance 无合格当日K线，继续重试/换源")
+            else:
+                print(f"{stock_code} efinance 返回空数据")
 
         except Exception as e:
             print(f"第{attempt + 1}次尝试失败: {e}")
@@ -419,5 +472,29 @@ def get_stock_data_with_retry(stock_code, beg, end, max_retries=5):
                 _eastmoney_host_ip_cache.clear()
                 _warm_eastmoney_dns()
 
-    print("所有重试次数已用尽")
+    # 收盘后才值得用 akshare/baostock 补当日；盘中直接失败更清晰
+    if not _is_after_a_share_close():
+        print(
+            f"{stock_code} efinance 失败且当前未收盘："
+            f"akshare/baostock 盘中通常无当日日线，放弃兜底"
+        )
+        return None
+
+    print(f"{stock_code} efinance 失败（已收盘），尝试 akshare 日线...")
+    try:
+        df = get_stock_data_akshare(stock_code, beg=beg, end=end)
+        if df is not None and not df.empty and _accept_daily_bar(df, stock_code, "akshare"):
+            return df
+    except Exception as e:
+        print(f"{stock_code} akshare 失败: {e}")
+
+    print(f"{stock_code} 尝试 baostock 日线（仅盘后）...")
+    try:
+        df = get_quote_history_baostock(stock_code, beg=beg, end=end, day_or_week="d")
+        if df is not None and not df.empty and _accept_daily_bar(df, stock_code, "baostock"):
+            return df
+    except Exception as e:
+        print(f"{stock_code} baostock 失败: {e}")
+
+    print(f"{stock_code} 所有数据源均失败或缺少当日K线")
     return None

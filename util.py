@@ -810,25 +810,23 @@ def trade_daily(code, results):
 
 def last_busy(code, results):
     trades = results['trades']
-    last_buy_ = ""
-    current_hold_= []
-    # import  pdb;pdb.set_trace()
-    # f" reason: {trades[-1].get('reason', 0)}\n" \
-    #  f" 数量: {trades[-1]['quantity']}\n" \
-    if len(trades) == 0:
-        return
+    current_hold_ = []
+    if not trades:
+        return current_hold_
     if trades[-1]['type'] == 'buy':
+        # 当日新买入归 trade_daily；这里只报“仍持仓、非今日买入”
         if trades[-1]['date'].strftime('%Y-%m-%d') != datetime.now().date().strftime('%Y-%m-%d'):
             stock_name = get_stock_name(code)
-            last_buy_ += f" 买入: {trades[-1]['date'].strftime('%Y-%m-%d')}, " \
-                           f" 价格: {trades[-1]['price']:.2f}\n" \
-                           f" 总收益 : {results['total_return'] * 100: .2f}%" \
-                           f" 夏普: {format(results['sharpe_ratio'], '.2f')}" \
-                           f" 胜率: {results['win_rate'] * 100:.2f}%\n" \
-                           f" code: {code}" \
-                           f" name: {stock_name}"
+            last_buy_ = (
+                f" 买入: {trades[-1]['date'].strftime('%Y-%m-%d')}, "
+                f" 价格: {trades[-1]['price']:.2f}\n"
+                f" 总收益 : {results['total_return'] * 100: .2f}%"
+                f" 夏普: {format(results['sharpe_ratio'], '.2f')}"
+                f" 胜率: {results['win_rate'] * 100:.2f}%\n"
+                f" code: {code}"
+                f" name: {stock_name}"
+            )
             current_hold_.append(last_buy_)
-            # print("sell today")
     return current_hold_
 
 

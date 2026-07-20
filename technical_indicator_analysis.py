@@ -129,6 +129,11 @@ class StockAnalyzer:
         print("股票行情数据下载完毕")
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
+        latest = df.index.max().date()
+        today = datetime.now().date()
+        print(f"{self.stock_code} 日线最新: {latest} (今天 {today})")
+        if latest < today and today.weekday() < 5:
+            print(f"警告: {self.stock_code} 缺少当日K线，今日信号无法判定")
         #############################################
         ##################afly#######################
         #############################################

@@ -1,17 +1,27 @@
 import efi_email
 import util
+print("why")
+
 import  time
 import backtest_dragon_stocks
 import backtest_strategy
+import os
+print("why")
 
 import logging
 logging.basicConfig(format='%(levelname)s : %(message)s', level=logging.INFO)
+print("why")
+
+os.system("C:\\Users\\DELL\\PyCharmMiscProject\\.venv\\Scripts\\python.exe -m pip install --upgrade akshare")
+os.system("C:\\Users\\DELL\\PyCharmMiscProject\\.venv\\Scripts\\python.exe -m pip install --upgrade baostock")
+os.system("C:\\Users\\DELL\\PyCharmMiscProject\\.venv\\Scripts\\python.exe -m pip install --upgrade efinance")
+efi_email.send("akshare update done")
 
 def efi_backtesting():
     efi_email.send("Start Stock Backtesting")
     # 记录开始时间
     start_time = time.time()
-    for i  in range(50):
+    for i  in range(1):
         stock_codes = []
         #常规关注股票
         stock_codes =list(set(stock_codes + [ '002119', '002448',
@@ -25,10 +35,12 @@ def efi_backtesting():
         #20251029 add
         stock_codes = list(set(stock_codes + ['600415', '002278', '600689', '603336', '603839','603336']))
         # stock_codes = ['600397', '603336','002379', '603881', '002448', '600689','600415','600539', '603839', ]
+        # stock_codes = ['600539' ]
+
         # stock_codes, day_dragons = util.get_dragon_tiger_stocks(date="20251022")
         # stock_codes = util.get_recent_days_lhb_stocks(days=120)
         all_results = []
-        daily_trades = []
+        daily_trades = []                                                                                                                                                                  
         last_buys = []
         logging.info("\n开始回测买入信号股票...")
         for code in stock_codes:
@@ -48,14 +60,45 @@ def efi_backtesting():
             daily_trades.append(util.trade_daily(code, results))
             # import pdb;pdb.set_trace()
             last_buys.append(util.last_busy(code, results))
+            # efi_email.send(str(daily_trades))
 
-        one_d_list = [item for sublist in daily_trades for item in sublist]
-        last_buys_list = [item for sublist in last_buys for item in sublist]
-        one_d_list.append("\n -------------------------------------- \n"
-                          " current holds \n "
-                           "--------------------------------------\n")
-        lt = one_d_list + last_buys_list
-        efi_email.send(lt)
+
+        one_d_list = [
+            item for sublist in daily_trades if sublist for item in sublist
+        ]
+        last_buys_list = [
+            item for sublist in last_buys if sublist for item in sublist
+        ]
+        mail_lines = [
+            f"回测日期: {time.strftime('%Y-%m-%d')}",
+            f"股票数: {len(stock_codes)}, 有效回测: {len(all_results)}",
+            "",
+            "--------------------------------------",
+            " today trades",
+            "--------------------------------------",
+        ]
+        if one_d_list:
+            mail_lines.extend(one_d_list)
+        else:
+            mail_lines.append("(无今日买卖)")
+        mail_lines.extend([
+            "",
+            "--------------------------------------",
+            " current holds",
+            "--------------------------------------",
+        ])
+        if last_buys_list:
+            mail_lines.extend(last_buys_list)
+        else:
+            mail_lines.append("(无当前持仓)")
+        logging.info(
+            "今日买卖 %s 条, 当前持仓 %s 条",
+            len(one_d_list),
+            len(last_buys_list),
+        )
+        for line in last_buys_list:
+            logging.info("%s", line)
+        efi_email.send(mail_lines)
         # 打印汇总统计
         # util.print_summary_statistics(all_results)
         # filtered_stocks = util.get_and_print_ideal_codes(all_results,                                                                                                                                nnnnnxnzn
