@@ -8,6 +8,13 @@ MAX_SIGNAL_DAY_PCT_CHG = 4.8
 DEFAULT_THRESHOLD = 1.15
 DEFAULT_HISTORY_YEARS = 3
 DEFAULT_PRE20_MAX_PCT = 20.0
+# 命中后二次过滤：收盘价上限（元）
+MAX_HIT_CLOSE_PRICE = 30.0
+# 命中后二次过滤：近 N 日日均成交额下限（元），默认 3000 万
+MIN_AVG_DAILY_AMOUNT = 30_000_000.0
+AVG_DAILY_AMOUNT_LOOKBACK = 20
+# 命中后二次过滤：动态市盈率上限（倍）；PE<=0 一并剔除
+MAX_HIT_PE = 200.0
 
 # --this-week-hits / --last-week-hits：同股去重窗口（自然日）
 HITS_PERIOD_DAYS = 7

@@ -4,13 +4,17 @@ from typing import Any, Dict, List
 import pandas as pd
 
 from .constants import (
+    AVG_DAILY_AMOUNT_LOOKBACK,
     DEFAULT_PRE20_MAX_PCT,
     DEFAULT_THRESHOLD,
     HITS_PERIOD_DAYS,
     MA20_TO_MA5_FACTOR,
     MA5_TO_MA10_MAX_RATIO,
     MA5_TO_MA10_MIN_RATIO,
+    MAX_HIT_CLOSE_PRICE,
+    MAX_HIT_PE,
     MAX_SIGNAL_DAY_PCT_CHG,
+    MIN_AVG_DAILY_AMOUNT,
     MIN_SIGNAL_DAY_PCT_CHG,
 )
 from .data import fetch_stock_df, normalize_stock_code
@@ -33,7 +37,10 @@ def describe_filter_conditions_text(
         f"MA5量能>=MA10量能*{th} 且 MA5/MA10>{MA5_TO_MA10_MIN_RATIO} 且 MA5/MA10<={MA5_TO_MA10_MAX_RATIO} "
         f"且 MA20量能<MA5*{MA20_TO_MA5_FACTOR} "
         f"且 当天涨跌幅∈({MIN_SIGNAL_DAY_PCT_CHG},{MAX_SIGNAL_DAY_PCT_CHG})% "
-        f"且 信号日前20日涨跌幅<{pre20}% 且 收盘>价格MA10 且 {describe_method3_condition()}"
+        f"且 信号日前20日涨跌幅<{pre20}% 且 收盘>价格MA10 且 {describe_method3_condition()} "
+        f"且 二次过滤(剔银行/剔净利润亏损/收盘<={MAX_HIT_CLOSE_PRICE}/"
+        f"近{AVG_DAILY_AMOUNT_LOOKBACK}日均成交额>={MIN_AVG_DAILY_AMOUNT / 1e4:.0f}万/"
+        f"PE∈(0,{MAX_HIT_PE}])"
     )
 
 
@@ -62,6 +69,14 @@ def describe_filter_conditions_bullets(
         f"  5) 信号日前20个交易日涨跌幅 < {pre20}%",
         "  6) 当日收盘 > 当日价格MA10（收盘10日均线）",
         f"  7) {describe_method3_condition()}",
+        "  8) 二次过滤: 剔除银行（名称/行业含银行）",
+        "  9) 二次过滤: 剔除最近完整报告期净利润 < 0",
+        f"  10) 二次过滤: 剔除信号日收盘价 > {MAX_HIT_CLOSE_PRICE}",
+        (
+            f"  11) 二次过滤: 剔除近{AVG_DAILY_AMOUNT_LOOKBACK}日日均成交额 "
+            f"< {MIN_AVG_DAILY_AMOUNT / 1e4:.0f}万"
+        ),
+        f"  12) 二次过滤: 剔除动态市盈率 PE<=0 或 PE>{MAX_HIT_PE}",
     ]
     return "\n".join(lines)
 
@@ -119,6 +134,11 @@ def prepare_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame | None:
     data["成交量"] = pd.to_numeric(data["成交量"], errors="coerce")
     data["收盘"] = pd.to_numeric(data["收盘"], errors="coerce")
     data["涨跌幅"] = pd.to_numeric(data["涨跌幅"], errors="coerce")
+    if "成交额" in data.columns:
+        data["成交额"] = pd.to_numeric(data["成交额"], errors="coerce")
+    else:
+        # 无成交额时用 收盘×成交量 近似（Baostock 成交量一般为股）
+        data["成交额"] = data["收盘"] * data["成交量"]
     data = data.dropna(subset=["成交量", "收盘", "涨跌幅"]).reset_index(drop=True)
     if len(data) < 250:
         return None
@@ -126,6 +146,7 @@ def prepare_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame | None:
     data["MA10量能"] = data["成交量"].rolling(10).mean()
     data["MA20量能"] = data["成交量"].rolling(20).mean()
     data["价格MA10"] = data["收盘"].rolling(10).mean()
+    data["日均成交额"] = data["成交额"].rolling(AVG_DAILY_AMOUNT_LOOKBACK).mean()
     return data
 
 
@@ -163,6 +184,12 @@ def check_hit_at_row(
     ):
         return None
 
+    avg_amount = row.get("日均成交额")
+    try:
+        avg_amount_f = float(avg_amount) if pd.notna(avg_amount) else float("nan")
+    except (TypeError, ValueError):
+        avg_amount_f = float("nan")
+
     return {
         "日期": str(row["日期"]),
         "MA5量能": float(ma5),
@@ -173,6 +200,7 @@ def check_hit_at_row(
         "价格MA10": float(price_ma10),
         "当天涨跌幅%": day_pct_chg,
         "信号日前20日涨跌幅%": pre20_pct_chg,
+        "日均成交额": avg_amount_f,
     }
 
 

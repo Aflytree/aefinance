@@ -33,6 +33,8 @@ from common import (
     format_filter_conditions_line,
     format_forward_summary,
     fetch_stock_df,
+    filter_hits_post,
+    format_post_filter_stats,
     get_signal_forward_returns,
     normalize_stock_code,
     prepare_ohlcv_df,
@@ -100,6 +102,8 @@ def get_mainboard_stock_pool() -> pd.DataFrame:
 
     # 剔除 ST、*ST、退市风险股票；创业板(300)已通过前缀排除
     df = df[~df["名称"].str.contains(r"ST|\*ST|退", case=False, regex=True, na=False)]
+    # 银行股不做量能扫描（名称含「银行」）
+    df = df[~df["名称"].str.contains("银行", na=False)]
     return df.reset_index(drop=True)
 
 
@@ -279,6 +283,7 @@ def build_email_body(
     total_count: int,
     *,
     signal_day: date | None = None,
+    post_filter_note: str = "",
 ) -> str:
     signal_day = signal_day or datetime.now().date()
     lines = [
@@ -287,15 +292,44 @@ def build_email_body(
         format_filter_conditions_line(
             threshold=threshold, pre20_max_pct=pre20_max_pct
         ),
-        f"命中数量: {len(hits)}",
-        "",
     ]
+    if post_filter_note:
+        lines.append(post_filter_note)
+    lines.extend(
+        [
+            f"命中数量: {len(hits)}",
+            "",
+        ]
+    )
 
     for item in hits:
+        extra = ""
+        avg_amt = item.get("日均成交额")
+        try:
+            if avg_amt is not None and float(avg_amt) == float(avg_amt):
+                extra += f" | 日均额:{float(avg_amt) / 1e4:.0f}万"
+        except (TypeError, ValueError):
+            pass
+        pe = item.get("PE")
+        try:
+            if pe is not None and float(pe) == float(pe):
+                extra += f" | PE:{float(pe):.1f}"
+        except (TypeError, ValueError):
+            pass
+        if item.get("净利润") is not None and not (
+            isinstance(item.get("净利润"), float) and pd.isna(item.get("净利润"))
+        ):
+            try:
+                extra += f" | 净利润:{float(item['净利润'])/1e8:.2f}亿"
+            except (TypeError, ValueError):
+                pass
+            if item.get("所处行业"):
+                extra += f" | 行业:{item['所处行业']}"
         lines.append(
             f"{item['股票代码']} {item['股票名称']} | 日期:{item['日期']} | MA5/MA10:{item['MA5/MA10']:.3f} | "
             f"收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
             f"当天涨跌幅:{item['当天涨跌幅%']:.2f}% | 前20日涨跌幅:{item['信号日前20日涨跌幅%']:.2f}%"
+            f"{extra}"
         )
     return "\n".join(lines)
 
@@ -309,6 +343,7 @@ def build_week_hits_email_body(
     week_end: date,
     *,
     period_label: str = "上周",
+    post_filter_note: str = "",
 ) -> str:
     lines = [
         f"{period_label}量能命中（{week_start} ~ {week_end}）",
@@ -318,9 +353,15 @@ def build_week_hits_email_body(
             pre20_max_pct=pre20_max_pct,
             label="条件同当日筛",
         ),
-        f"命中数量: {len(hits)}（{describe_signal_dedupe_rule()}）",
-        "",
     ]
+    if post_filter_note:
+        lines.append(post_filter_note)
+    lines.extend(
+        [
+            f"命中数量: {len(hits)}（{describe_signal_dedupe_rule()}）",
+            "",
+        ]
+    )
     if not hits:
         lines.append(f"{period_label}无命中记录。")
         return "\n".join(lines)
@@ -717,7 +758,7 @@ def _main_body(args: argparse.Namespace) -> None:
     if args.limit is not None:
         pool = pool.head(int(args.limit)).copy()
         print(f"已启用 --limit {args.limit}，实际扫描 {len(pool)} 只", flush=True)
-    print(f"主板股票池数量(剔除ST/创业板): {len(pool)}", flush=True)
+    print(f"主板股票池数量(剔除ST/创业板/银行): {len(pool)}", flush=True)
 
     lg = bs.login()
     if lg.error_code != "0":
@@ -817,6 +858,15 @@ def _main_body(args: argparse.Namespace) -> None:
 
     hits = sorted(hits, key=lambda x: x["股票代码"])
     week_hits = dedupe_hits_first_within_days(week_hits)
+
+    hits, hit_stats = filter_hits_post(hits)
+    week_hits, week_stats = filter_hits_post(week_hits)
+    post_note = format_post_filter_stats(hit_stats)
+    week_post_note = format_post_filter_stats(week_stats)
+    print(post_note, flush=True)
+    if week_start is not None:
+        print(f"{week_period_label}{week_post_note}", flush=True)
+
     date_tag = datetime.now().strftime("%Y%m%d")
     body = build_email_body(
         hits=hits,
@@ -824,6 +874,7 @@ def _main_body(args: argparse.Namespace) -> None:
         pre20_max_pct=pre20_max_pct,
         total_count=len(pool),
         signal_day=signal_day,
+        post_filter_note=post_note,
     )
 
     report_daily = _root / f"volume_ma_filter_daily_all_{date_tag}.txt"
@@ -842,6 +893,7 @@ def _main_body(args: argparse.Namespace) -> None:
             week_start,
             week_end,
             period_label=week_period_label,
+            post_filter_note=week_post_note,
         )
         week_suffix = "thisweek" if args.this_week_hits else "lastweek"
         report_week = _root / f"volume_ma_filter_daily_all_{week_suffix}_{date_tag}.txt"
