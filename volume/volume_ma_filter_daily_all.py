@@ -242,6 +242,38 @@ def get_previous_period_range(ref: datetime | None = None) -> Tuple[date, date]:
     return start, end
 
 
+def get_recent_calendar_days_range(
+    days: int,
+    *,
+    end_day: date | None = None,
+) -> Tuple[date, date]:
+    """
+    以 end_day（默认信号日/最近交易日）为终点，向前覆盖 days 个自然日的闭区间。
+    例：end=07-31、days=3 → 07-29 ~ 07-31。
+    """
+    if days < 1:
+        raise ValueError("days 必须 >= 1")
+    end = end_day or datetime.now().date()
+    start = end - timedelta(days=days - 1)
+    return start, end
+
+
+def get_week_before_days_ago(
+    days_ago: int,
+    *,
+    anchor_day: date | None = None,
+) -> Tuple[date, date]:
+    """
+    以 anchor_day（默认今天）往前推 days_ago 天为终点，再倒推 7 个自然日（含终点）。
+    例：anchor=08-01、days_ago=3 → 终点 07-29 → 区间 07-23 ~ 07-29。
+    """
+    if days_ago < 0:
+        raise ValueError("days_ago 必须 >= 0")
+    end = (anchor_day or datetime.now().date()) - timedelta(days=days_ago)
+    start = end - timedelta(days=6)
+    return start, end
+
+
 def scan_last_week_hits(
     pool_df: pd.DataFrame,
     threshold: float,
@@ -366,10 +398,101 @@ def build_week_hits_email_body(
         lines.append(f"{period_label}无命中记录。")
         return "\n".join(lines)
     for item in hits:
+        extra = _format_ma_extra(item)
         lines.append(
             f"{item['股票代码']} {item['股票名称']} | 命中日期:{item['日期']} | "
             f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
             f"当天涨跌幅:{item['当天涨跌幅%']:.2f}% | 前20日涨跌幅:{item['信号日前20日涨跌幅%']:.2f}%"
+            f"{extra}"
+        )
+    return "\n".join(lines)
+
+
+def _ma_val(hit: Dict[str, Any], key: str) -> float:
+    try:
+        v = float(hit.get(key))
+        return v if v == v else float("nan")
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _format_ma_extra(hit: Dict[str, Any]) -> str:
+    ma120 = _ma_val(hit, "价格MA120")
+    ma250 = _ma_val(hit, "价格MA250")
+    close = _ma_val(hit, "收盘")
+    if close != close:
+        return ""
+    parts = []
+    if ma120 == ma120 and ma250 == ma250:
+        parts.append(f"收盘:{close:.2f}/半年线:{ma120:.2f}/年线:{ma250:.2f}")
+    tags = hit.get("均线位置标签")
+    if tags:
+        parts.append(str(tags))
+    return (" | " + " | ".join(parts)) if parts else ""
+
+
+def annotate_hit_ma_position(hit: Dict[str, Any]) -> Dict[str, Any]:
+    """标注命中日收盘相对半年线/年线位置。"""
+    out = dict(hit)
+    close = _ma_val(out, "收盘")
+    ma120 = _ma_val(out, "价格MA120")
+    ma250 = _ma_val(out, "价格MA250")
+    tags = []
+    if ma250 == ma250 and close > ma250:
+        tags.append("年线上方")
+    if ma120 == ma120 and close > ma120:
+        tags.append("半年线上方")
+    out["均线位置标签"] = "+".join(tags) if tags else ""
+    out["站上年线或半年线"] = bool(tags)
+    return out
+
+
+def filter_hits_above_ma120_or_ma250(
+    hits: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """保留命中日收盘价 > MA120 或 > MA250 的记录。"""
+    annotated = [annotate_hit_ma_position(h) for h in hits]
+    kept = [h for h in annotated if h.get("站上年线或半年线")]
+    stats = {
+        "before": len(hits),
+        "after": len(kept),
+        "drop_below_ma": len(hits) - len(kept),
+    }
+    return kept, stats
+
+
+def format_above_ma_filter_stats(stats: Dict[str, Any]) -> str:
+    return (
+        f"均线过滤(收盘>半年线或年线): {stats.get('before', 0)} -> {stats.get('after', 0)} "
+        f"(低于均线-{stats.get('drop_below_ma', 0)})"
+    )
+
+
+def build_above_ma_report_body(
+    hits: List[Dict[str, Any]],
+    *,
+    title: str,
+    source_note: str,
+    ma_filter_note: str,
+) -> str:
+    lines = [
+        title,
+        source_note,
+        "附加条件: 命中日收盘价 > 价格MA120（半年线） 或 > 价格MA250（年线）",
+        ma_filter_note,
+        f"命中数量: {len(hits)}",
+        "",
+    ]
+    if not hits:
+        lines.append("无符合均线条件的命中。")
+        return "\n".join(lines)
+    for item in hits:
+        extra = _format_ma_extra(item)
+        lines.append(
+            f"{item['股票代码']} {item.get('股票名称', '')} | 命中日期:{item['日期']} | "
+            f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
+            f"当天涨跌幅:{item['当天涨跌幅%']:.2f}% | 前20日涨跌幅:{item['信号日前20日涨跌幅%']:.2f}%"
+            f"{extra}"
         )
     return "\n".join(lines)
 
@@ -690,6 +813,25 @@ def main() -> None:
         help="额外扫描本周（周一至周五，未到周五则截至今日）内的命中",
     )
     parser.add_argument(
+        "--recent-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="额外扫描以信号日为终点的近 N 个自然日内命中（可与 --last-week-hits 同用）",
+    )
+    parser.add_argument(
+        "--week-before-days-ago",
+        type=int,
+        default=None,
+        metavar="N",
+        help="以日历今日往前 N 天为终点，倒推 7 个自然日的命中（含终点日）",
+    )
+    parser.add_argument(
+        "--above-ma120-or-ma250",
+        action="store_true",
+        help="额外输出/附带：命中日收盘价在半年线(MA120)或年线(MA250)上方的子集报告",
+    )
+    parser.add_argument(
         "--no-send-email",
         action="store_true",
         help="不发送邮件，仅写本地报告",
@@ -784,24 +926,42 @@ def _main_body(args: argparse.Namespace) -> None:
         )
 
     hits: List[Dict[str, Any]] = []
-    week_hits: List[Dict[str, Any]] = []
-    week_start: date | None = None
-    week_end: date | None = None
-    week_period_label = ""
+    # 额外区间：(标签, 起始, 结束, 报告文件后缀)
+    extra_periods: List[Tuple[str, date, date, str]] = []
     if args.this_week_hits and args.last_week_hits:
         print("请只指定 --this-week-hits 或 --last-week-hits 之一。", flush=True)
         return
-    if args.this_week_hits:
-        week_start, week_end = get_current_period_range()
-        week_period_label = "本周"
-    elif args.last_week_hits:
-        week_start, week_end = get_previous_period_range()
-        week_period_label = "上周"
-    if week_start is not None and week_end is not None:
-        print(
-            f"{week_period_label}区间: {week_start} ~ {week_end}（将随全池扫描一并统计）",
-            flush=True,
+    if args.recent_days is not None:
+        if int(args.recent_days) < 1:
+            print("--recent-days 必须 >= 1", flush=True)
+            return
+        r_start, r_end = get_recent_calendar_days_range(
+            int(args.recent_days), end_day=signal_day
         )
+        extra_periods.append(
+            (f"近{int(args.recent_days)}日", r_start, r_end, f"recent{int(args.recent_days)}d")
+        )
+    if args.week_before_days_ago is not None:
+        if int(args.week_before_days_ago) < 0:
+            print("--week-before-days-ago 必须 >= 0", flush=True)
+            return
+        n = int(args.week_before_days_ago)
+        w_start, w_end = get_week_before_days_ago(n, anchor_day=calendar_today)
+        extra_periods.append(
+            (f"{n}天前倒推一周", w_start, w_end, f"weekbefore{n}d")
+        )
+    if args.this_week_hits:
+        w_start, w_end = get_current_period_range()
+        extra_periods.append(("本周", w_start, w_end, "thisweek"))
+    elif args.last_week_hits:
+        w_start, w_end = get_previous_period_range()
+        extra_periods.append(("上周", w_start, w_end, "lastweek"))
+
+    period_hits: Dict[str, List[Dict[str, Any]]] = {
+        label: [] for label, _, _, _ in extra_periods
+    }
+    for label, p_start, p_end, _ in extra_periods:
+        print(f"{label}区间: {p_start} ~ {p_end}（将随全池扫描一并统计）", flush=True)
 
     n_pool = len(pool)
     fetch_ok = 0
@@ -829,11 +989,11 @@ def _main_body(args: argparse.Namespace) -> None:
                     hit["股票代码"] = code
                     hit["股票名称"] = name
                     hits.append(hit)
-                if week_start is not None and week_end is not None:
-                    in_week = data[
-                        (data["_日期"] >= week_start) & (data["_日期"] <= week_end)
+                for label, p_start, p_end, _ in extra_periods:
+                    in_period = data[
+                        (data["_日期"] >= p_start) & (data["_日期"] <= p_end)
                     ]
-                    for idx in in_week.index:
+                    for idx in in_period.index:
                         w_hit = check_hit_at_row(
                             data, int(idx), threshold, pre20_max_pct
                         )
@@ -841,7 +1001,7 @@ def _main_body(args: argparse.Namespace) -> None:
                             continue
                         w_hit["股票代码"] = code
                         w_hit["股票名称"] = name
-                        week_hits.append(w_hit)
+                        period_hits[label].append(w_hit)
             except Exception as e:
                 fetch_fail += 1
                 print(f"{code} 处理异常: {e}", flush=True)
@@ -857,15 +1017,9 @@ def _main_body(args: argparse.Namespace) -> None:
     )
 
     hits = sorted(hits, key=lambda x: x["股票代码"])
-    week_hits = dedupe_hits_first_within_days(week_hits)
-
     hits, hit_stats = filter_hits_post(hits)
-    week_hits, week_stats = filter_hits_post(week_hits)
     post_note = format_post_filter_stats(hit_stats)
-    week_post_note = format_post_filter_stats(week_stats)
     print(post_note, flush=True)
-    if week_start is not None:
-        print(f"{week_period_label}{week_post_note}", flush=True)
 
     date_tag = datetime.now().strftime("%Y%m%d")
     body = build_email_body(
@@ -882,24 +1036,63 @@ def _main_body(args: argparse.Namespace) -> None:
     print(body, flush=True)
     print(f"\n报告1（当日/最近交易日命中）: {report_daily}", flush=True)
 
-    week_body = ""
-    report_week: Path | None = None
-    if week_start is not None and week_end is not None:
-        week_body = build_week_hits_email_body(
-            week_hits,
+    period_bodies: List[Tuple[str, str, Path]] = []
+    for label, p_start, p_end, suffix in extra_periods:
+        phits = dedupe_hits_first_within_days(period_hits.get(label, []))
+        phits, pstats = filter_hits_post(phits)
+        pnote = format_post_filter_stats(pstats)
+        print(f"{label}{pnote}", flush=True)
+        pbody = build_week_hits_email_body(
+            phits,
             threshold,
             pre20_max_pct,
             len(pool),
-            week_start,
-            week_end,
-            period_label=week_period_label,
-            post_filter_note=week_post_note,
+            p_start,
+            p_end,
+            period_label=label,
+            post_filter_note=pnote,
         )
-        week_suffix = "thisweek" if args.this_week_hits else "lastweek"
-        report_week = _root / f"volume_ma_filter_daily_all_{week_suffix}_{date_tag}.txt"
-        report_week.write_text(week_body, encoding="utf-8")
-        print("\n" + week_body, flush=True)
-        print(f"\n报告（{week_period_label}命中）: {report_week}", flush=True)
+        preport = _root / f"volume_ma_filter_daily_all_{suffix}_{date_tag}.txt"
+        preport.write_text(pbody, encoding="utf-8")
+        print("\n" + pbody, flush=True)
+        print(f"\n报告（{label}命中）: {preport}", flush=True)
+        period_bodies.append((label, pbody, preport))
+        if args.above_ma120_or_ma250:
+            ma_hits, ma_stats = filter_hits_above_ma120_or_ma250(phits)
+            ma_note = format_above_ma_filter_stats(ma_stats)
+            print(f"{label}{ma_note}", flush=True)
+            ma_body = build_above_ma_report_body(
+                ma_hits,
+                title=f"{label}量能命中 · 股价在年线或半年线上方（{p_start} ~ {p_end}）",
+                source_note=f"来源: {preport.name}",
+                ma_filter_note=ma_note,
+            )
+            ma_report = (
+                _root
+                / f"volume_ma_filter_daily_all_{suffix}_above_ma120or250_{date_tag}.txt"
+            )
+            ma_report.write_text(ma_body, encoding="utf-8")
+            print("\n" + ma_body, flush=True)
+            print(f"\n报告（{label}·年线/半年线上方）: {ma_report}", flush=True)
+            period_bodies.append((f"{label}·年线/半年线上方", ma_body, ma_report))
+
+    if args.above_ma120_or_ma250:
+        ma_daily, ma_daily_stats = filter_hits_above_ma120_or_ma250(hits)
+        ma_daily_note = format_above_ma_filter_stats(ma_daily_stats)
+        print(f"当日{ma_daily_note}", flush=True)
+        ma_daily_body = build_above_ma_report_body(
+            ma_daily,
+            title=f"{signal_day} 日终量能命中 · 股价在年线或半年线上方",
+            source_note=f"来源: {report_daily.name}",
+            ma_filter_note=ma_daily_note,
+        )
+        ma_daily_report = (
+            _root / f"volume_ma_filter_daily_all_above_ma120or250_{date_tag}.txt"
+        )
+        ma_daily_report.write_text(ma_daily_body, encoding="utf-8")
+        print("\n" + ma_daily_body, flush=True)
+        print(f"\n报告（当日·年线/半年线上方）: {ma_daily_report}", flush=True)
+        period_bodies.append(("当日·年线/半年线上方", ma_daily_body, ma_daily_report))
 
     history_years = int(args.history_years)
     report_signal_hits_fwd = (
@@ -946,16 +1139,19 @@ def _main_body(args: argparse.Namespace) -> None:
                 flush=True,
             )
 
-    if week_body and args.this_week_hits:
-        email_parts = [week_body]
-        attach = [report_week] if report_week is not None else []
+    # 仅「本周」且无其他区间时，邮件以本周为主；否则以当日命中开头，再附各区间
+    only_this_week = (
+        len(period_bodies) == 1 and period_bodies[0][0] == "本周"
+    )
+    if only_this_week:
+        email_parts = [period_bodies[0][1]]
+        attach = [period_bodies[0][2]]
     else:
         email_parts = [body]
         attach = [report_daily]
-        if week_body:
-            email_parts.append("\n\n---\n" + week_body)
-            if report_week is not None:
-                attach.append(report_week)
+        for _, pbody, preport in period_bodies:
+            email_parts.append("\n\n---\n" + pbody)
+            attach.append(preport)
     if signal_hits_fwd_summaries:
         email_parts.append("\n\n---\n" + "\n\n".join(signal_hits_fwd_summaries))
     if exported_signal_hits_fwd and exported_signal_hits_fwd.is_file():

@@ -11,6 +11,7 @@ from .constants import (
     MAX_HIT_CLOSE_PRICE,
     MAX_HIT_PE,
     MIN_AVG_DAILY_AMOUNT,
+    MIN_HIT_CLOSE_PRICE,
 )
 
 _earnings_cache: tuple[str, pd.DataFrame] | None = None
@@ -210,16 +211,19 @@ def _fmt_amount_wan(amount: float) -> str:
 def describe_post_hit_filters(
     *,
     max_close: float | None = None,
+    min_close: float | None = None,
     min_avg_amount: float | None = None,
     max_pe: float | None = None,
     earnings_period: str | None = None,
 ) -> str:
     price_cap = MAX_HIT_CLOSE_PRICE if max_close is None else max_close
+    price_floor = MIN_HIT_CLOSE_PRICE if min_close is None else min_close
     amount_floor = MIN_AVG_DAILY_AMOUNT if min_avg_amount is None else min_avg_amount
     pe_cap = MAX_HIT_PE if max_pe is None else max_pe
     period = earnings_period or "最近完整报告期"
     return (
-        f"二次过滤: 剔除名称/行业含银行; 剔除收盘价>{price_cap}; "
+        f"二次过滤: 剔除名称/行业含银行; "
+        f"剔除收盘价<{price_floor}或>{price_cap}; "
         f"剔除近{AVG_DAILY_AMOUNT_LOOKBACK}日日均成交额<{_fmt_amount_wan(amount_floor)}; "
         f"剔除动态PE<=0或PE>{pe_cap}; "
         f"剔除业绩报表({period})净利润<0"
@@ -230,6 +234,7 @@ def filter_hits_post(
     hits: List[Dict[str, Any]],
     *,
     max_close: float | None = None,
+    min_close: float | None = None,
     min_avg_amount: float | None = None,
     max_pe: float | None = None,
     drop_loss: bool = True,
@@ -242,12 +247,14 @@ def filter_hits_post(
     返回 (保留列表, 统计信息)。
     """
     price_cap = MAX_HIT_CLOSE_PRICE if max_close is None else max_close
+    price_floor = MIN_HIT_CLOSE_PRICE if min_close is None else min_close
     amount_floor = MIN_AVG_DAILY_AMOUNT if min_avg_amount is None else min_avg_amount
     pe_cap = MAX_HIT_PE if max_pe is None else max_pe
     stats: Dict[str, Any] = {
         "before": len(hits),
         "drop_bank": 0,
-        "drop_price": 0,
+        "drop_price_high": 0,
+        "drop_price_low": 0,
         "drop_loss": 0,
         "drop_low_amount": 0,
         "drop_pe": 0,
@@ -256,6 +263,8 @@ def filter_hits_post(
         "earnings_period": "",
         "min_avg_amount": amount_floor,
         "max_pe": pe_cap,
+        "min_close": price_floor,
+        "max_close": price_cap,
     }
     if not hits:
         return [], stats
@@ -309,9 +318,13 @@ def filter_hits_post(
         if drop_bank and is_bank_stock(name, industry):
             stats["drop_bank"] += 1
             continue
-        if close_f == close_f and close_f > price_cap:  # not NaN
-            stats["drop_price"] += 1
-            continue
+        if close_f == close_f:  # not NaN
+            if close_f > price_cap:
+                stats["drop_price_high"] += 1
+                continue
+            if close_f < price_floor:
+                stats["drop_price_low"] += 1
+                continue
         if drop_low_amount:
             avg_amt = hit.get("日均成交额")
             try:
@@ -342,10 +355,16 @@ def filter_hits_post(
 def format_post_filter_stats(stats: Dict[str, Any]) -> str:
     amount_floor = float(stats.get("min_avg_amount", MIN_AVG_DAILY_AMOUNT))
     pe_cap = float(stats.get("max_pe", MAX_HIT_PE))
+    price_floor = float(stats.get("min_close", MIN_HIT_CLOSE_PRICE))
+    price_cap = float(stats.get("max_close", MAX_HIT_CLOSE_PRICE))
+    # 兼容旧字段 drop_price
+    drop_high = stats.get("drop_price_high", stats.get("drop_price", 0))
+    drop_low = stats.get("drop_price_low", 0)
     return (
         f"二次过滤: {stats.get('before', 0)} -> {stats.get('after', 0)} "
         f"(银行-{stats.get('drop_bank', 0)}, "
-        f"高价>{MAX_HIT_CLOSE_PRICE}-{stats.get('drop_price', 0)}, "
+        f"高价>{price_cap}-{drop_high}, "
+        f"低价<{price_floor}-{drop_low}, "
         f"日均额<{_fmt_amount_wan(amount_floor)}-{stats.get('drop_low_amount', 0)}, "
         f"PE<=0或>{pe_cap}-{stats.get('drop_pe', 0)}, "
         f"亏损-{stats.get('drop_loss', 0)}; "

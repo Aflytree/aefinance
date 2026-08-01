@@ -15,6 +15,7 @@ from .constants import (
     MAX_HIT_PE,
     MAX_SIGNAL_DAY_PCT_CHG,
     MIN_AVG_DAILY_AMOUNT,
+    MIN_HIT_CLOSE_PRICE,
     MIN_SIGNAL_DAY_PCT_CHG,
 )
 from .data import fetch_stock_df, normalize_stock_code
@@ -38,7 +39,8 @@ def describe_filter_conditions_text(
         f"且 MA20量能<MA5*{MA20_TO_MA5_FACTOR} "
         f"且 当天涨跌幅∈({MIN_SIGNAL_DAY_PCT_CHG},{MAX_SIGNAL_DAY_PCT_CHG})% "
         f"且 信号日前20日涨跌幅<{pre20}% 且 收盘>价格MA10 且 {describe_method3_condition()} "
-        f"且 二次过滤(剔银行/剔净利润亏损/收盘<={MAX_HIT_CLOSE_PRICE}/"
+        f"且 二次过滤(剔银行/剔净利润亏损/"
+        f"收盘∈[{MIN_HIT_CLOSE_PRICE},{MAX_HIT_CLOSE_PRICE}]/"
         f"近{AVG_DAILY_AMOUNT_LOOKBACK}日均成交额>={MIN_AVG_DAILY_AMOUNT / 1e4:.0f}万/"
         f"PE∈(0,{MAX_HIT_PE}])"
     )
@@ -71,7 +73,10 @@ def describe_filter_conditions_bullets(
         f"  7) {describe_method3_condition()}",
         "  8) 二次过滤: 剔除银行（名称/行业含银行）",
         "  9) 二次过滤: 剔除最近完整报告期净利润 < 0",
-        f"  10) 二次过滤: 剔除信号日收盘价 > {MAX_HIT_CLOSE_PRICE}",
+        (
+            f"  10) 二次过滤: 剔除信号日收盘价 < {MIN_HIT_CLOSE_PRICE} "
+            f"或 > {MAX_HIT_CLOSE_PRICE}"
+        ),
         (
             f"  11) 二次过滤: 剔除近{AVG_DAILY_AMOUNT_LOOKBACK}日日均成交额 "
             f"< {MIN_AVG_DAILY_AMOUNT / 1e4:.0f}万"
@@ -146,6 +151,8 @@ def prepare_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame | None:
     data["MA10量能"] = data["成交量"].rolling(10).mean()
     data["MA20量能"] = data["成交量"].rolling(20).mean()
     data["价格MA10"] = data["收盘"].rolling(10).mean()
+    data["价格MA120"] = data["收盘"].rolling(120).mean()
+    data["价格MA250"] = data["收盘"].rolling(250).mean()
     data["日均成交额"] = data["成交额"].rolling(AVG_DAILY_AMOUNT_LOOKBACK).mean()
     return data
 
@@ -190,6 +197,13 @@ def check_hit_at_row(
     except (TypeError, ValueError):
         avg_amount_f = float("nan")
 
+    def _ma_f(col: str) -> float:
+        v = row.get(col)
+        try:
+            return float(v) if pd.notna(v) else float("nan")
+        except (TypeError, ValueError):
+            return float("nan")
+
     return {
         "日期": str(row["日期"]),
         "MA5量能": float(ma5),
@@ -198,6 +212,8 @@ def check_hit_at_row(
         "MA5/MA10": ratio,
         "收盘": close,
         "价格MA10": float(price_ma10),
+        "价格MA120": _ma_f("价格MA120"),
+        "价格MA250": _ma_f("价格MA250"),
         "当天涨跌幅%": day_pct_chg,
         "信号日前20日涨跌幅%": pre20_pct_chg,
         "日均成交额": avg_amount_f,
