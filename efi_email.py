@@ -34,7 +34,7 @@ def send_email(smtp_server, port, sender_email, password, receiver_email, messag
     except Exception as e:
         print(f"发送邮件时出错: {e}")
 
-def send(body, attachments=None):
+def send(body, attachments=None, subject=None):
     nbody = ""
     if type(body) == list:
         if len(body) != 0:
@@ -49,7 +49,7 @@ def send(body, attachments=None):
         # receiver = '17301333257@163.com'
         receiver = "19282286879@163.com"
         sender = "zhangaifei.2008@163.com"
-        subject = "test case"
+        subject = subject or "test case"
         smtp_server = "smtp.163.com"
         port = 465
         password = "FHhPc9WARnuqsG2e"
@@ -57,5 +57,3 @@ def send(body, attachments=None):
         send_email(smtp_server, port, sender, password, receiver, message)
     else:
         print("不满足发送条件，不发送邮件。")
-
-        #FHhPc9WARnuqsG2e

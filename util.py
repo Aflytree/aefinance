@@ -315,18 +315,23 @@ def print_backtest_results(results):
     print(f"平均持股天数: {results['avg_holding_days']:.1f}天")
     print(f"盈利平均持股天数: {results['avg_winning_holding_days']:.1f}天")
     print(f"亏损平均持股天数: {results['avg_losing_holding_days']:.1f}天")
+    if results.get('total_fees') is not None:
+        print(f"累计交易费用: {results['total_fees']:,.2f}")
     print("\n交易明细:")
     for trade in results['trades']:
+        fee = trade.get('fee', 0) or 0
         if trade['type'] == 'buy':
             print(f"买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                   f"价格: {trade['price']:.2f}, "
                   f"数量: {trade['quantity']}, "
+                  f"费用: {fee:.2f}, "
                   f"reason: {trade['reason']}")
         else:
             print(f"卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, "
                   f"价格: {trade['price']:.2f}, "
                   f"数量: {trade['quantity']}, "
                   f"收益率: {trade.get('return', 0) * 100:.2f}%, "
+                  f"费用: {fee:.2f}, "
                   f"持仓天数: {trade.get('holding_days', 0)}, "
                   f"reason: {trade['reason']}")
 
@@ -772,18 +777,29 @@ def print_signal_summary(buy_signals, sell_signals, neutral_signals):
         print(f"- {code} {name}")
 
 
-def trade_daily(code, results):
+def _signal_day_str(results, signal_day=None):
+    """信号日：优先显式传入，其次结果里的 data_as_of，否则日历今天。"""
+    if signal_day is not None:
+        if hasattr(signal_day, "strftime"):
+            return signal_day.strftime("%Y-%m-%d")
+        return str(signal_day)
+    data_as_of = results.get("data_as_of")
+    if data_as_of is not None:
+        if hasattr(data_as_of, "strftime"):
+            return data_as_of.strftime("%Y-%m-%d")
+        return str(data_as_of)
+    return datetime.now().date().strftime("%Y-%m-%d")
+
+
+def trade_daily(code, results, signal_day=None):
+    """统计信号日（默认=最新K线日）的买卖。"""
     trades = results['trades']
+    day = _signal_day_str(results, signal_day)
     today_trades = []
     for trade in trades:
-        # print(trade['trades'])
         today_trade = ""
-        # import pdb;pdb.set_trace()
-        #f" 数量: {trade['quantity']}" \
-        # f" reason: {trade.get('reason', 0)}\n" \
-        # f" 数量: {trade['quantity']}, " \
         if trade['type'] == 'buy':
-            if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
+            if trade['date'].strftime('%Y-%m-%d') == day:
                 stock_name = get_stock_name(code)
                 today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
                                f" 价格: {trade['price']:.2f} \n" \
@@ -794,7 +810,7 @@ def trade_daily(code, results):
                                f" name: {stock_name}"
                 today_trades.append(today_trade)
         else:
-            if trade['date'].strftime('%Y-%m-%d') == datetime.now().date().strftime('%Y-%m-%d'):
+            if trade['date'].strftime('%Y-%m-%d') == day:
                 stock_name = get_stock_name(code)
                 today_trade += f" 卖出 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
                                f" 价格: {trade['price']:.2f}, \n" \
@@ -804,18 +820,19 @@ def trade_daily(code, results):
                                f" code: {code}" \
                                f" name: {stock_name}"
                 today_trades.append(today_trade)
-                # print("sell today")
     return today_trades
 
 
-def last_busy(code, results):
+def last_busy(code, results, signal_day=None):
+    """当前持仓（买入日不是信号日的仍持仓）。"""
     trades = results['trades']
     current_hold_ = []
     if not trades:
         return current_hold_
+    day = _signal_day_str(results, signal_day)
     if trades[-1]['type'] == 'buy':
-        # 当日新买入归 trade_daily；这里只报“仍持仓、非今日买入”
-        if trades[-1]['date'].strftime('%Y-%m-%d') != datetime.now().date().strftime('%Y-%m-%d'):
+        # 信号日新买入归 trade_daily；这里只报“仍持仓、非信号日买入”
+        if trades[-1]['date'].strftime('%Y-%m-%d') != day:
             stock_name = get_stock_name(code)
             last_buy_ = (
                 f" 买入: {trades[-1]['date'].strftime('%Y-%m-%d')}, "
