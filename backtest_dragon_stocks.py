@@ -1,124 +1,140 @@
+import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 import pandas as pd
 import time
 import util
 import backtest_strategy
+import efi_email
+
+LHB30_CHECKPOINT = Path(__file__).resolve().parent / "lhb30_checkpoint.json"
+
+def _load_lhb_checkpoint():
+    if not LHB30_CHECKPOINT.exists():
+        return {"done": {}, "failed": []}
+    try:
+        with LHB30_CHECKPOINT.open(encoding="utf-8") as f:
+            data = json.load(f)
+        data.setdefault("done", {})
+        data.setdefault("failed", [])
+        return data
+    except Exception as e:
+        logging.warning(f"读取断点文件失败，将重新开始: {e}")
+        return {"done": {}, "failed": []}
+
+
+def _save_lhb_checkpoint(checkpoint):
+    tmp = LHB30_CHECKPOINT.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(checkpoint, f, ensure_ascii=False, indent=2)
+    tmp.replace(LHB30_CHECKPOINT)
+
+
+def _summarize_backtest(results):
+    last_buy = _last_buy_date(results)
+    trades = results.get("trades") or []
+    holding = bool(trades) and trades[-1].get("type") == "buy"
+    return {
+        "stock_code": results.get("stock_code"),
+        "stock_name": results.get("stock_name"),
+        "win_rate": results.get("win_rate"),
+        "total_return": results.get("total_return"),
+        "annual_return": results.get("annual_return"),
+        "sharpe_ratio": results.get("sharpe_ratio"),
+        "number_of_trades": results.get("number_of_trades"),
+        "initial_capital": results.get("initial_capital"),
+        "final_capital": results.get("final_capital"),
+        "position": results.get("position"),
+        "last_buy_date": last_buy.isoformat() if last_buy else None,
+        "is_holding": holding,
+    }
+
 
 def backtest_recent_dragon_stocks(total_lhb_days = 170, single_stock_start_date = '20240323',
                                   win_rate_th = 0.60,
                                   total_return = 2.00):
     """
-    自动遍历最近每天的龙虎榜股票并进行回测
+    最近 N 个交易日龙虎榜去重回测，支持断点续跑。
     """
-    # 获取当前日期
-    end_date = datetime.now()
-    # 计算日期
-    start_date = end_date - timedelta(days=total_lhb_days)
+    try:
+        stock_history = __import__("stock_history")
+        stock_history._tickplus_disabled = True
+        stock_history.BULK_DATA_MODE = True
+    except Exception:
+        pass
+    logging.info(f"开始回测最近{total_lhb_days}个交易日龙虎榜去重股票")
+    codes_path = Path(__file__).resolve().parent / "lhb30_codes.json"
+    if codes_path.exists():
+        with codes_path.open(encoding="utf-8") as f:
+            stock_codes = json.load(f)
+        logging.info(f"使用已缓存龙虎榜股票列表: {len(stock_codes)}")
+    else:
+        stock_codes = util.get_recent_days_lhb_stocks(days=total_lhb_days)
+        stock_codes = sorted(set(stock_codes))
+        with codes_path.open("w", encoding="utf-8") as f:
+            json.dump(stock_codes, f, ensure_ascii=False, indent=2)
+        logging.info(f"龙虎榜列表已缓存到 {codes_path}")
+    stock_codes = sorted(set(stock_codes))
+    logging.info(f"去重后股票数: {len(stock_codes)}")
 
-    logging.info(
-        f"开始回测最近龙虎榜股票，时间范围: {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
+    checkpoint = _load_lhb_checkpoint()
+    done = checkpoint["done"]
+    failed = set(checkpoint.get("failed") or [])
+    logging.info(f"断点已完成 {len(done)} 只，失败 {len(failed)} 只")
 
-    # 生成最近的所有日期
-    date_range = pd.date_range(start=start_date, end=end_date)
-
-    all_stock_results = []  # 改为存储所有单个股票的结果
-    summary_stats = []
-    total_stocks_tested = 0
     successful_tests = 0
-    print(date_range)
-
-    for current_date in date_range:
-        date_str = current_date.strftime('%Y%m%d')
-        # 跳过周末（可选，因为股票市场周末不交易）
-        if current_date.weekday() >= 5:  # 5=周六, 6=周日
+    for i, code in enumerate(stock_codes, 1):
+        if code in done or code in failed:
+            logging.info(f"[{i}/{len(stock_codes)}] {code} 已处理，跳过")
+            if code in done:
+                successful_tests += 1
             continue
-
         try:
-            logging.info(f"\n{'=' * 60}")
-            logging.info(f"处理日期: {date_str}")
-            logging.info(f"{'=' * 60}")
-
-            # 获取当天的龙虎榜股票
-            stock_codes, day_dragons = util.get_dragon_tiger_stocks(date=date_str)
-
-            if not stock_codes:
-                logging.info(f"日期 {date_str} 没有龙虎榜数据或数据获取失败")
-                continue
-
-            logging.info(f"日期 {date_str} 龙虎榜股票数量: {len(stock_codes)}")
-            logging.info(f"股票代码: {stock_codes}")
-
-            daily_results = []
-            daily_trades = []
-            daily_last_buys = []
-            # import pdb;pdb.set_trace()
-            # stock_codes = ['000014', '600617', '600748', '601608', '603011', '605255', '000027', '000592']
-            for i, code in enumerate(stock_codes, 1):
-                try:
-                    logging.info(f"\n[{i}/{len(stock_codes)}] 回测股票: {code}")
-
-                    # 进行回测
-                    results = backtest_strategy.backtest_strategy(
-                        code,
-                        bg= single_stock_start_date,  # 回测开始日期
-                        initial_capital_=1000000,
-                        target_return_=0.11,
-                        stop_loss_=-0.03,
-                        init_stop_n_times=0
-                    )
-
-                    if results is None:
-                        logging.info(f"股票 {code} 回测无结果，可能数据不足")
-                        continue
-
-                    # 打印回测结果
-                    # util.print_backtest_results(results)
-
-                    # 收集结果 - 将单个股票结果添加到总列表中
-                    all_stock_results.append(results)
-                    daily_results.append(results)
-                    daily_trades.append(util.trade_daily(code, results))
-                    daily_last_buys.append(util.last_busy(code, results))
-
-                    successful_tests += 1
-                    logging.info(f"股票 {code} 回测完成")
-
-                    # 添加短暂延迟，避免请求过于频繁
-                    time.sleep(0.5)
-
-                except Exception as e:
-                    logging.error(f"回测股票 {code} 时出错: {str(e)}")
-                    continue
-
-            total_stocks_tested += len(stock_codes)
-
-            # 汇总当天的回测结果
-            if daily_results:
-                date_summary = {
-                    'date': date_str,
-                    'stock_count': len(stock_codes),
-                    'successful_backtests': len(daily_results),
-                    'results': daily_results,
-                    'trades': daily_trades,
-                    'last_buys': daily_last_buys
-                }
-                summary_stats.append(date_summary)
-
-                logging.info(f"\n✅ 日期 {date_str} 回测完成: {len(daily_results)}/{len(stock_codes)} 只股票回测成功")
+            logging.info(f"[{i}/{len(stock_codes)}] 回测 {code}")
+            results = backtest_strategy.backtest_strategy(
+                code,
+                bg=single_stock_start_date,
+                initial_capital_=1000000,
+                target_return_=0.11,
+                stop_loss_=-0.03,
+                init_stop_n_times=0,
+            )
+            if results is None:
+                logging.info(f"股票 {code} 回测无结果，可能数据不足")
+                failed.add(code)
             else:
-                logging.info(f"\n❌ 日期 {date_str} 所有股票回测均失败")
-
+                done[code] = _summarize_backtest(results)
+                successful_tests += 1
+                logging.info(
+                    f"完成 {code}  收益 {results.get('total_return', 0):.2%} "
+                    f"胜率 {results.get('win_rate', 0):.2%}"
+                )
         except Exception as e:
-            logging.error(f"处理日期 {date_str} 时出错: {str(e)}")
-            continue
+            logging.error(f"回测股票 {code} 时出错: {str(e)}")
+            failed.add(code)
+        checkpoint["done"] = done
+        checkpoint["failed"] = sorted(failed)
+        _save_lhb_checkpoint(checkpoint)
 
-    # 生成月度汇总报告
-    generate_monthly_report(summary_stats, total_stocks_tested, successful_tests, all_stock_results,
-                            win_rate_th,
-                            total_return)
-
-    return all_stock_results  # 返回所有单个股票的结果
+    all_stock_results = list(done.values())
+    summary_stats = [{
+        "date": datetime.now().strftime("%Y%m%d"),
+        "stock_count": len(stock_codes),
+        "successful_backtests": successful_tests,
+        "results": all_stock_results,
+        "trades": [],
+        "last_buys": [],
+    }]
+    generate_monthly_report(
+        summary_stats,
+        len(stock_codes),
+        successful_tests,
+        all_stock_results,
+        win_rate_th,
+        total_return,
+    )
+    return all_stock_results
 
 
 def generate_monthly_report(summary_stats, total_stocks, successful_tests, all_stock_results,
@@ -151,9 +167,15 @@ def generate_monthly_report(summary_stats, total_stocks, successful_tests, all_s
     if all_stock_results:
         logging.info(f"\n开始筛选高性能股票...")
         high_performance_stocks = filter_high_performance_stocks(all_stock_results, win_rate_th, total_return)
+        for stock in high_performance_stocks:
+            if not stock.get("stock_name"):
+                stock["stock_name"] = util.get_stock_name(stock.get("stock_code")) or ""
         print_high_performance_details(high_performance_stocks, win_rate_th, total_return)
         generate_performance_report(high_performance_stocks)
         save_high_performance_stocks(high_performance_stocks, win_rate_th, total_return)
+        recent_buy_stocks = filter_recent_buy_stocks(high_performance_stocks)
+        print_recent_buy_stocks(recent_buy_stocks)
+        notify_recent_buy_stocks(recent_buy_stocks, win_rate_th, total_return)
     else:
         logging.info("没有回测结果可供筛选")
 
@@ -249,6 +271,85 @@ def filter_high_performance_stocks(all_stock_results, win_rate_th = 0.60, total_
             continue
 
     return high_performance_stocks
+
+
+RECENT_BUY_DAYS = 10
+
+
+def _last_buy_date(stock_result):
+    trades = stock_result.get("trades") or []
+    buy_trades = [t for t in trades if t.get("type") == "buy"]
+    if not buy_trades:
+        return None
+    return pd.to_datetime(buy_trades[-1]["date"]).date()
+
+
+def filter_recent_buy_stocks(stock_results, recent_days=RECENT_BUY_DAYS):
+    """筛选当前仍持仓，或最近 recent_days 天内有过买入的股票。"""
+    today = datetime.now().date()
+    matched = []
+    for stock in stock_results:
+        last_buy = stock.get("last_buy_date") or _last_buy_date(stock)
+        if isinstance(last_buy, str):
+            last_buy = pd.to_datetime(last_buy).date()
+        if last_buy is None:
+            continue
+        trades = stock.get("trades") or []
+        holding = stock.get("is_holding")
+        if holding is None:
+            holding = bool(trades) and trades[-1].get("type") == "buy"
+        recent = (today - last_buy).days <= recent_days
+        if holding or recent:
+            stock = dict(stock)
+            stock["last_buy_date"] = last_buy
+            stock["is_holding"] = holding
+            matched.append(stock)
+    matched.sort(key=lambda x: x.get("last_buy_date") or datetime.min.date(), reverse=True)
+    return matched
+
+
+def print_recent_buy_stocks(recent_buy_stocks, recent_days=RECENT_BUY_DAYS):
+    logging.info(f"\n{'=' * 100}")
+    logging.info(f"最近有买入的股票（当前持仓，或近{recent_days}天内买入）")
+    logging.info(f"{'=' * 100}")
+    if not recent_buy_stocks:
+        logging.info("没有符合条件的近期买入股票")
+        return
+    logging.info(f"共 {len(recent_buy_stocks)} 只")
+    for i, stock in enumerate(recent_buy_stocks, 1):
+        status = "持仓中" if stock.get("is_holding") else "已卖出"
+        logging.info(
+            f"{i}. {stock.get('stock_code')} {stock.get('stock_name', '')} "
+            f"最近买入 {stock.get('last_buy_date')} [{status}] "
+            f"总收益 {stock.get('total_return', 0):.2%} 胜率 {stock.get('win_rate', 0):.2%}"
+        )
+
+
+def notify_recent_buy_stocks(recent_buy_stocks, win_rate_th, total_return, recent_days=RECENT_BUY_DAYS):
+    mail_lines = [
+        f"回测日期: {datetime.now().strftime('%Y-%m-%d')}",
+        f"最近30日龙虎榜 | 胜率>={win_rate_th:.0%} 且 总收益>={total_return:.0%}",
+        f"再筛：当前持仓或近{recent_days}天内买入",
+        f"命中 {len(recent_buy_stocks)} 只",
+        "",
+        "--------------------------------------",
+        " recent buys",
+        "--------------------------------------",
+    ]
+    if not recent_buy_stocks:
+        mail_lines.append("(无)")
+    else:
+        for stock in recent_buy_stocks:
+            status = "持仓中" if stock.get("is_holding") else "已卖出"
+            mail_lines.append(
+                f"{stock.get('stock_code')} {stock.get('stock_name', '')} "
+                f"买入 {stock.get('last_buy_date')} [{status}] "
+                f"收益 {stock.get('total_return', 0):.2%} 胜率 {stock.get('win_rate', 0):.2%}"
+            )
+    try:
+        efi_email.send(mail_lines)
+    except Exception as e:
+        logging.error(f"发送近期买入邮件失败: {e}")
 
 
 def print_high_performance_details(high_performance_stocks,win_rate_th = 0.60, total_return = 2.00):

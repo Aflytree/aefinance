@@ -79,9 +79,18 @@ class StockAnalyzer:
         print(f"  请求日期: {beg} 到 {end}")
         print(f"  实际获取: {extended_beg} 到 {end}（提前10个月）")
 
-        weekly_df = stock_history.get_quote_history_baostock(
-            stock_code, extended_beg, end, day_or_week="w"
-        )
+        weekly_df = None
+        # 本地日线模式：直接用日线重采样周线，避免无效 TickPlus 请求
+        if getattr(stock_history, "USE_LOCAL_DAILY_FIRST", False):
+            print("周线：本地日线重采样")
+            weekly_df = self.get_weekly_data_from_daily()
+        else:
+            weekly_df = stock_history.get_quote_history_tickplus(
+                stock_code, extended_beg, end, period="1w"
+            )
+            if weekly_df is None or weekly_df.empty:
+                print("周线改用日线重采样")
+                weekly_df = self.get_weekly_data_from_daily()
 
         if weekly_df is None or weekly_df.empty:
             print("警告: 未能获取周线数据")
@@ -120,7 +129,7 @@ class StockAnalyzer:
         # setup_efinance_session()
 
         ############################################################################
-        # 这里可以选择是使用akshare, efinance还是 baostock
+        # 数据源：本地 Excel(+overlay) 优先 -> TickPlus / 腾讯 / efinance / akshare / baostock
         ############################################################################
         df = stock_history.get_stock_data_with_retry(self.stock_code, self.beg, self.end)
         if df is None or df.empty:
@@ -137,8 +146,8 @@ class StockAnalyzer:
         #############################################
         ##################afly#######################
         #############################################
-        print("显示股票行情数据")
-        print(df)
+        print("显示股票行情数据（最近2行）")
+        print(df.tail(2))
         # import pdb;pdb.set_trace()
         # return df.tail(self.days)
         return df
@@ -451,7 +460,7 @@ class StockAnalyzer:
             self.df.index = pd.to_datetime(self.df.index)
 
         # 按周重新采样（周一为一周的开始）
-        weekly_df = self.df.resample('W-MON').agg({
+        weekly_df = self.df.resample('W-FRI').agg({
             '开盘': 'first',  # 周一的开盘价
             '最高': 'max',  # 一周的最高价
             '最低': 'min',  # 一周的最低价
@@ -516,10 +525,10 @@ class StockAnalyzer:
                 # 如果找不到精确匹配，找最近的一周
                 # print("⚠️  未找到精确匹配，使用最接近的周线数据")
                 # 计算每个周线日期与目标日期的差值
-                date_diffs = abs((weekly_df.index - week_end_date).days)
-                closest_idx = date_diffs.idxmin()
-                idx_position = weekly_df.index.get_loc(closest_idx)
-
+                date_diffs = (weekly_df.index - week_end_date).to_series().abs()
+                idx_position = int(date_diffs.argmin())
+                if isinstance(weekly_df.index.get_loc(weekly_df.index[idx_position]), slice):
+                    idx_position = weekly_df.index.get_loc(weekly_df.index[idx_position]).start
                 latest = weekly_df.iloc[idx_position]
                 prev = weekly_df.iloc[max(idx_position - 1, 0)]
 
