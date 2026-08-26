@@ -16,6 +16,9 @@ MIN_AVG_DAILY_AMOUNT = 30_000_000.0
 AVG_DAILY_AMOUNT_LOOKBACK = 20
 # 命中后二次过滤：动态市盈率上限（倍）；PE<=0 一并剔除
 MAX_HIT_PE = 200.0
+# 命中后二次过滤：命中日换手率区间（%）
+MIN_HIT_TURNOVER_PCT = 3.0
+MAX_HIT_TURNOVER_PCT = 7.0
 
 # --this-week-hits / --last-week-hits：同股去重窗口（自然日）
 HITS_PERIOD_DAYS = 7

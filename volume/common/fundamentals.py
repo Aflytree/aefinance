@@ -10,8 +10,10 @@ from .constants import (
     AVG_DAILY_AMOUNT_LOOKBACK,
     MAX_HIT_CLOSE_PRICE,
     MAX_HIT_PE,
+    MAX_HIT_TURNOVER_PCT,
     MIN_AVG_DAILY_AMOUNT,
     MIN_HIT_CLOSE_PRICE,
+    MIN_HIT_TURNOVER_PCT,
 )
 
 _earnings_cache: tuple[str, pd.DataFrame] | None = None
@@ -214,16 +216,21 @@ def describe_post_hit_filters(
     min_close: float | None = None,
     min_avg_amount: float | None = None,
     max_pe: float | None = None,
+    min_turnover: float | None = None,
+    max_turnover: float | None = None,
     earnings_period: str | None = None,
 ) -> str:
     price_cap = MAX_HIT_CLOSE_PRICE if max_close is None else max_close
     price_floor = MIN_HIT_CLOSE_PRICE if min_close is None else min_close
     amount_floor = MIN_AVG_DAILY_AMOUNT if min_avg_amount is None else min_avg_amount
     pe_cap = MAX_HIT_PE if max_pe is None else max_pe
+    turn_floor = MIN_HIT_TURNOVER_PCT if min_turnover is None else min_turnover
+    turn_cap = MAX_HIT_TURNOVER_PCT if max_turnover is None else max_turnover
     period = earnings_period or "最近完整报告期"
     return (
         f"二次过滤: 剔除名称/行业含银行; "
         f"剔除收盘价<{price_floor}或>{price_cap}; "
+        f"剔除命中日换手率<{turn_floor}%或>{turn_cap}%; "
         f"剔除近{AVG_DAILY_AMOUNT_LOOKBACK}日日均成交额<{_fmt_amount_wan(amount_floor)}; "
         f"剔除动态PE<=0或PE>{pe_cap}; "
         f"剔除业绩报表({period})净利润<0"
@@ -237,10 +244,13 @@ def filter_hits_post(
     min_close: float | None = None,
     min_avg_amount: float | None = None,
     max_pe: float | None = None,
+    min_turnover: float | None = None,
+    max_turnover: float | None = None,
     drop_loss: bool = True,
     drop_bank: bool = True,
     drop_low_amount: bool = True,
     drop_bad_pe: bool = True,
+    drop_bad_turnover: bool = True,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     对量能命中结果做二次过滤。
@@ -250,11 +260,16 @@ def filter_hits_post(
     price_floor = MIN_HIT_CLOSE_PRICE if min_close is None else min_close
     amount_floor = MIN_AVG_DAILY_AMOUNT if min_avg_amount is None else min_avg_amount
     pe_cap = MAX_HIT_PE if max_pe is None else max_pe
+    turn_floor = MIN_HIT_TURNOVER_PCT if min_turnover is None else min_turnover
+    turn_cap = MAX_HIT_TURNOVER_PCT if max_turnover is None else max_turnover
     stats: Dict[str, Any] = {
         "before": len(hits),
         "drop_bank": 0,
         "drop_price_high": 0,
         "drop_price_low": 0,
+        "drop_turnover_low": 0,
+        "drop_turnover_high": 0,
+        "drop_turnover_missing": 0,
         "drop_loss": 0,
         "drop_low_amount": 0,
         "drop_pe": 0,
@@ -265,6 +280,8 @@ def filter_hits_post(
         "max_pe": pe_cap,
         "min_close": price_floor,
         "max_close": price_cap,
+        "min_turnover": turn_floor,
+        "max_turnover": turn_cap,
     }
     if not hits:
         return [], stats
@@ -325,6 +342,20 @@ def filter_hits_post(
             if close_f < price_floor:
                 stats["drop_price_low"] += 1
                 continue
+        if drop_bad_turnover:
+            try:
+                turn_f = float(hit.get("换手率"))
+            except (TypeError, ValueError):
+                turn_f = float("nan")
+            if turn_f != turn_f:  # NaN / 缺失
+                stats["drop_turnover_missing"] += 1
+                continue
+            if turn_f < turn_floor:
+                stats["drop_turnover_low"] += 1
+                continue
+            if turn_f > turn_cap:
+                stats["drop_turnover_high"] += 1
+                continue
         if drop_low_amount:
             avg_amt = hit.get("日均成交额")
             try:
@@ -357,14 +388,22 @@ def format_post_filter_stats(stats: Dict[str, Any]) -> str:
     pe_cap = float(stats.get("max_pe", MAX_HIT_PE))
     price_floor = float(stats.get("min_close", MIN_HIT_CLOSE_PRICE))
     price_cap = float(stats.get("max_close", MAX_HIT_CLOSE_PRICE))
+    turn_floor = float(stats.get("min_turnover", MIN_HIT_TURNOVER_PCT))
+    turn_cap = float(stats.get("max_turnover", MAX_HIT_TURNOVER_PCT))
     # 兼容旧字段 drop_price
     drop_high = stats.get("drop_price_high", stats.get("drop_price", 0))
     drop_low = stats.get("drop_price_low", 0)
+    drop_turn = (
+        int(stats.get("drop_turnover_low", 0))
+        + int(stats.get("drop_turnover_high", 0))
+        + int(stats.get("drop_turnover_missing", 0))
+    )
     return (
         f"二次过滤: {stats.get('before', 0)} -> {stats.get('after', 0)} "
         f"(银行-{stats.get('drop_bank', 0)}, "
         f"高价>{price_cap}-{drop_high}, "
         f"低价<{price_floor}-{drop_low}, "
+        f"换手率不在[{turn_floor},{turn_cap}]%-{drop_turn}, "
         f"日均额<{_fmt_amount_wan(amount_floor)}-{stats.get('drop_low_amount', 0)}, "
         f"PE<=0或>{pe_cap}-{stats.get('drop_pe', 0)}, "
         f"亏损-{stats.get('drop_loss', 0)}; "

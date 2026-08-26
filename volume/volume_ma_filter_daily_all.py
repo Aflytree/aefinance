@@ -336,6 +336,12 @@ def build_email_body(
 
     for item in hits:
         extra = ""
+        try:
+            turn = item.get("换手率")
+            if turn is not None and float(turn) == float(turn):
+                extra += f" | 换手率:{float(turn):.2f}%"
+        except (TypeError, ValueError):
+            pass
         avg_amt = item.get("日均成交额")
         try:
             if avg_amt is not None and float(avg_amt) == float(avg_amt):
@@ -399,6 +405,12 @@ def build_week_hits_email_body(
         return "\n".join(lines)
     for item in hits:
         extra = _format_ma_extra(item)
+        try:
+            turn = item.get("换手率")
+            if turn is not None and float(turn) == float(turn):
+                extra = f" | 换手率:{float(turn):.2f}%" + extra
+        except (TypeError, ValueError):
+            pass
         lines.append(
             f"{item['股票代码']} {item['股票名称']} | 命中日期:{item['日期']} | "
             f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
@@ -488,6 +500,12 @@ def build_above_ma_report_body(
         return "\n".join(lines)
     for item in hits:
         extra = _format_ma_extra(item)
+        try:
+            turn = item.get("换手率")
+            if turn is not None and float(turn) == float(turn):
+                extra = f" | 换手率:{float(turn):.2f}%" + extra
+        except (TypeError, ValueError):
+            pass
         lines.append(
             f"{item['股票代码']} {item.get('股票名称', '')} | 命中日期:{item['日期']} | "
             f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "

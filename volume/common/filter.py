@@ -13,9 +13,11 @@ from .constants import (
     MA5_TO_MA10_MIN_RATIO,
     MAX_HIT_CLOSE_PRICE,
     MAX_HIT_PE,
+    MAX_HIT_TURNOVER_PCT,
     MAX_SIGNAL_DAY_PCT_CHG,
     MIN_AVG_DAILY_AMOUNT,
     MIN_HIT_CLOSE_PRICE,
+    MIN_HIT_TURNOVER_PCT,
     MIN_SIGNAL_DAY_PCT_CHG,
 )
 from .data import fetch_stock_df, normalize_stock_code
@@ -41,6 +43,7 @@ def describe_filter_conditions_text(
         f"且 信号日前20日涨跌幅<{pre20}% 且 收盘>价格MA10 且 {describe_method3_condition()} "
         f"且 二次过滤(剔银行/剔净利润亏损/"
         f"收盘∈[{MIN_HIT_CLOSE_PRICE},{MAX_HIT_CLOSE_PRICE}]/"
+        f"换手率∈[{MIN_HIT_TURNOVER_PCT},{MAX_HIT_TURNOVER_PCT}]%/"
         f"近{AVG_DAILY_AMOUNT_LOOKBACK}日均成交额>={MIN_AVG_DAILY_AMOUNT / 1e4:.0f}万/"
         f"PE∈(0,{MAX_HIT_PE}])"
     )
@@ -78,10 +81,14 @@ def describe_filter_conditions_bullets(
             f"或 > {MAX_HIT_CLOSE_PRICE}"
         ),
         (
-            f"  11) 二次过滤: 剔除近{AVG_DAILY_AMOUNT_LOOKBACK}日日均成交额 "
+            f"  11) 二次过滤: 剔除命中日换手率 < {MIN_HIT_TURNOVER_PCT}% "
+            f"或 > {MAX_HIT_TURNOVER_PCT}%"
+        ),
+        (
+            f"  12) 二次过滤: 剔除近{AVG_DAILY_AMOUNT_LOOKBACK}日日均成交额 "
             f"< {MIN_AVG_DAILY_AMOUNT / 1e4:.0f}万"
         ),
-        f"  12) 二次过滤: 剔除动态市盈率 PE<=0 或 PE>{MAX_HIT_PE}",
+        f"  13) 二次过滤: 剔除动态市盈率 PE<=0 或 PE>{MAX_HIT_PE}",
     ]
     return "\n".join(lines)
 
@@ -144,6 +151,8 @@ def prepare_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame | None:
     else:
         # 无成交额时用 收盘×成交量 近似（Baostock 成交量一般为股）
         data["成交额"] = data["收盘"] * data["成交量"]
+    if "换手率" in data.columns:
+        data["换手率"] = pd.to_numeric(data["换手率"], errors="coerce")
     data = data.dropna(subset=["成交量", "收盘", "涨跌幅"]).reset_index(drop=True)
     if len(data) < 250:
         return None
@@ -217,6 +226,7 @@ def check_hit_at_row(
         "当天涨跌幅%": day_pct_chg,
         "信号日前20日涨跌幅%": pre20_pct_chg,
         "日均成交额": avg_amount_f,
+        "换手率": _ma_f("换手率"),
     }
 
 
