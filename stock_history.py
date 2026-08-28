@@ -937,6 +937,88 @@ def load_overlay_daily_bars(stock_code) -> pd.DataFrame | None:
     return None
 
 
+def save_overlay_daily_bars(stock_code, bars: pd.DataFrame | None) -> None:
+    """
+    将合成/补齐的日线追加写入 history_daily/overlay/{code}.csv。
+    按日期去重 keep last，避免「昨天合成的当日K」隔天丢失导致持仓断档。
+    """
+    if bars is None or bars.empty:
+        return
+    code = _normalize_a_share_code(stock_code)
+    _LOCAL_OVERLAY_DIR.mkdir(parents=True, exist_ok=True)
+    path = _LOCAL_OVERLAY_DIR / f"{code}.csv"
+    try:
+        new_df = _normalize_ohlcv_df(bars.copy())
+        if new_df is None or new_df.empty:
+            return
+        new_df["日期"] = pd.to_datetime(new_df["日期"]).dt.strftime("%Y-%m-%d")
+        if path.exists():
+            old = pd.read_csv(path)
+            old = _normalize_ohlcv_df(old)
+            if old is not None and not old.empty:
+                old["日期"] = pd.to_datetime(old["日期"]).dt.strftime("%Y-%m-%d")
+                merged = pd.concat([old, new_df], ignore_index=True)
+            else:
+                merged = new_df
+        else:
+            merged = new_df
+        merged = merged.drop_duplicates(subset=["日期"], keep="last")
+        merged = merged.sort_values("日期").reset_index(drop=True)
+        # 只保留最近约 60 个交易日的增量，避免 overlay 无限膨胀
+        if len(merged) > 60:
+            merged = merged.iloc[-60:].reset_index(drop=True)
+        merged.to_csv(path, index=False, encoding="utf-8-sig")
+        print(f"{code} 已落盘 overlay {len(merged)} 条 -> {path.name}")
+    except Exception as e:
+        print(f"{code} 写入 overlay 失败: {e}")
+
+
+def fill_daily_gap_from_network(stock_code, local: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    本地底仓最新日 < 昨天时，用腾讯/新浪补齐中间交易日。
+    解决：Excel 只到 T-2，昨天用分钟线拼了 T-1 但未落盘，今天直接拼 T 导致断档。
+    """
+    if local is None or local.empty:
+        return None
+    latest = _latest_bar_date(local)
+    today = datetime.now().date()
+    if latest is None:
+        return None
+    # 本地已含今日或仅缺今日（今日由分钟线拼），无需补历史缺口
+    if latest >= today:
+        return None
+    gap_days = (today - latest).days
+    if gap_days <= 1:
+        return None
+    code = _normalize_a_share_code(stock_code)
+    beg = (latest + pd.Timedelta(days=1)).strftime("%Y%m%d")
+    end = today.strftime("%Y%m%d")
+    print(f"{code} 本地最新 {latest}，补齐缺口 {beg}->{end}")
+    df = None
+    try:
+        df = get_quote_history_tencent(stock_code, beg=beg, end=end)
+    except Exception as e:
+        print(f"{code} 腾讯补缺口失败: {e}")
+    if df is None or df.empty:
+        try:
+            df = get_quote_history_sina(stock_code, beg=beg, end=end)
+        except Exception as e:
+            print(f"{code} 新浪补缺口失败: {e}")
+    if df is None or df.empty:
+        return None
+    df = _normalize_ohlcv_df(df)
+    if df is None or df.empty:
+        return None
+    df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+    # 不要覆盖「今日未收盘」合成棒；缺口补到昨日即可
+    today_s = today.strftime("%Y-%m-%d")
+    df = df[df["日期"] < today_s]
+    if df.empty:
+        return None
+    print(f"{code} 缺口补齐 {len(df)} 条，区间 {df['日期'].iloc[0]} ~ {df['日期'].iloc[-1]}")
+    return df
+
+
 def merge_daily_with_overlay(base: pd.DataFrame, overlay: pd.DataFrame | None) -> pd.DataFrame:
     """按日期合并；overlay 覆盖同日，用于拼当天/修正最新一根。"""
     if overlay is None or overlay.empty:
@@ -1082,9 +1164,16 @@ def get_stock_data_with_retry(stock_code, beg, end, max_retries=3):
         if local is not None and not local.empty:
             # 手动 overlay 优先；没有再拉新浪当天
             overlay = load_overlay_daily_bars(stock_code)
+            # 本地与「今日」之间缺交易日时，用网络补齐并落盘
+            gap_bars = fill_daily_gap_from_network(stock_code, local)
+            if gap_bars is not None and not gap_bars.empty:
+                save_overlay_daily_bars(stock_code, gap_bars)
+                overlay = merge_daily_with_overlay(gap_bars, overlay)
             if FETCH_TODAY_BAR:
                 today_bar = fetch_today_daily_bar(stock_code)
                 if today_bar is not None and not today_bar.empty:
+                    # 当日合成 K 落盘，避免明天跑回测时「昨天买入」消失
+                    save_overlay_daily_bars(stock_code, today_bar)
                     # 手动 overlay 覆盖自动当天（同日 keep last：先自动后手动）
                     overlay = merge_daily_with_overlay(today_bar, overlay)
             df = merge_daily_with_overlay(local, overlay)

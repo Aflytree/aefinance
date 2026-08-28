@@ -4,7 +4,7 @@ import technical_indicator_analysis
 import logging
 import util
 
-STRICT_STOP_LOSS = False
+STRICT_STOP_LOSS = True             # 止损按限价成交，避免收盘跌破阈值仍深亏
 
 # 优化开关
 POSITION_FRACTION = 0.5          # 半仓
@@ -16,6 +16,16 @@ ATR_BUFFER_MULT = 1.5            # 缓冲期额外倍数
 ENABLE_STOP_COOLDOWN = True      # 连续止损冷静期
 MAX_CONSECUTIVE_STOP_LOSS = 3
 COOLDOWN_DAYS = 10
+MAX_DYN_STOP_LOSS = -0.06        # ATR 动态止损下限（最多 6%）
+
+# 买入信号（与 compute_signal_scores 对齐）
+USE_STRUCTURED_BUY_SIGNAL = True
+USE_STRUCTURED_SELL_SIGNAL = True
+MIN_BUY_CATEGORIES = 2
+MAX_SELL_SCORE_FOR_ENTRY = 1
+SELL_MIN_HOLD_DAYS = 7
+SELL_MIN_PROFIT = 0.05
+SELL_MAX_LOSS = -0.03
 
 # A股交易成本（近似）
 ENABLE_TRADE_FEE = True
@@ -118,13 +128,22 @@ def backtest_strategy(stock_code,
                 mark_to_market = capital + position * current_price
                 equity_curve.append(mark_to_market)
 
-                advice = analyzer.get_trading_advice1()
-                buy_signal, sell_signal = util.parse_trading_signals(advice)
+                if USE_STRUCTURED_BUY_SIGNAL:
+                    sig = analyzer.compute_signal_scores()
+                    buy_signal = sig['buy_score']
+                    sell_signal = sig['sell_score']
+                    buy_allowed = sig['buy_ok']
+                    advice = ""
+                else:
+                    advice = analyzer.get_trading_advice1()
+                    buy_signal, sell_signal = util.parse_trading_signals(advice)
+                    buy_allowed = buy_signal >= 2
+                    sig = None
 
                 if position == 0:  # 没有持仓
                     if ENABLE_STOP_COOLDOWN and i < cooldown_until_idx:
                         continue
-                    if buy_signal >= 2:  # 至少达到有效买入信号
+                    if buy_allowed:
                         weekly_analysis = analyzer.analyze_weekly_moving_averages(date)
                         weekly_advice = ""
                         if REQUIRE_WEEKLY_FILTER:
@@ -139,6 +158,11 @@ def backtest_strategy(stock_code,
                             if not (ma5 > ma20 and ma5 > ma10):
                                 continue
                             weekly_advice = '五周线在20/10周线上方'
+                        buy_reason = weekly_advice
+                        if sig:
+                            tags = sig.get('buy_tags', [])
+                            if tags:
+                                buy_reason += ' [' + '+'.join(tags[:5]) + ']'
 
                         buy_trades_holdings.append(
                             {
@@ -195,7 +219,7 @@ def backtest_strategy(stock_code,
                             'quantity': position,
                             'signals': buy_signal,
                             'advice': advice,
-                            'reason': ''.join(weekly_advice),
+                            'reason': buy_reason,
                             'position_fraction': POSITION_FRACTION,
                             'entry_atr': entry_atr,
                             'fee': buy_fee,
@@ -215,8 +239,11 @@ def backtest_strategy(stock_code,
                         })
 
                     holding_days += 1
-                    # 价格涨跌幅（不含费）用于触发止损/止盈阈值
+                    current_price = float(df['收盘'].iloc[i])
+                    day_low = float(df['最低'].iloc[i])
+                    # 收盘价用于止盈/卖出信号；最低价用于止损触发（模拟盘中止损单）
                     price_return = (current_price - entry_price) / entry_price
+                    low_return = (day_low - entry_price) / entry_price
                     sell_reason = []
                     is_stop_loss = False
                     actual_sell_price = apply_sell_slippage(current_price)
@@ -228,20 +255,32 @@ def backtest_strategy(stock_code,
                         if holding_days <= ATR_BUFFER_DAYS:
                             mult *= ATR_BUFFER_MULT
                         atr_stop = -mult * atr_pct
-                        dyn_stop = max(min(stop_loss, atr_stop), -0.08)
+                        dyn_stop = max(min(stop_loss, atr_stop), MAX_DYN_STOP_LOSS)
 
-                    if STRICT_STOP_LOSS and price_return <= dyn_stop:
+                    stop_triggered = low_return <= dyn_stop
+                    if stop_triggered:
                         actual_sell_price = apply_sell_slippage(entry_price * (1 + dyn_stop))
-                        sell_reason.append(f"严格执行止损：{dyn_stop * 100:.2f}%")
-                        is_stop_loss = True
-                    elif not STRICT_STOP_LOSS and price_return <= dyn_stop:
                         sell_reason.append(
-                            f"触发止损：{price_return * 100:.2f}%(阈值{dyn_stop * 100:.2f}%)"
+                            f"触发止损：限价{dyn_stop * 100:.2f}%成交"
+                            f"(当日最低{low_return * 100:.2f}%，收盘{price_return * 100:.2f}%)"
                         )
                         is_stop_loss = True
                     elif price_return >= target_return:
                         sell_reason.append(f"达到目标收益：{price_return * 100:.2f}%")
-                    elif sell_signal >= 4 and holding_days > 7:
+                    elif USE_STRUCTURED_SELL_SIGNAL and sig and technical_indicator_analysis.StockAnalyzer.evaluate_sell_ok(
+                        sig,
+                        price_return,
+                        holding_days,
+                        min_hold_days=SELL_MIN_HOLD_DAYS,
+                        min_profit=SELL_MIN_PROFIT,
+                        max_loss=SELL_MAX_LOSS,
+                    ):
+                        tags = sig.get('sell_tags', [])
+                        tag_hint = f" [{'+'.join(tags[:4])}]" if tags else ""
+                        sell_reason.append(
+                            f"出现强烈卖出信号且持有超过{SELL_MIN_HOLD_DAYS}天{tag_hint}"
+                        )
+                    elif not USE_STRUCTURED_SELL_SIGNAL and sell_signal >= 4 and holding_days > 7:
                         sell_reason.append("出现强烈卖出信号且持有超过7天")
 
                     if sell_reason:

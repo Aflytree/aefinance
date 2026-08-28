@@ -176,7 +176,7 @@ def efi_backtesting():
         #                                                  num_of_trades=6
         #                                                  )
         # util.get_and_print_execution_time(start_time)
-        # time.sleep(400)
+        time.sleep(400)
         # # # # # # # # # # 可视化结果
         # util.visualize_backtest_results(all_results)
         # # # 打印统计摘要

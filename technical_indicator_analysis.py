@@ -687,37 +687,203 @@ class StockAnalyzer:
 
         return analysis
 
+    def compute_signal_scores(
+        self,
+        price_trend=None,
+        volume_analysis=None,
+        technical_analysis=None,
+        pattern_analysis=None,
+    ):
+        """
+        结构化买卖评分（回测与建议文本共用）。
+        买入需 buy_score>=3、至少 2 类确认、卖出分<=1，且非超买/严重追高。
+        """
+        df = self.df
+        if price_trend is None:
+            price_trend = self._analyze_price_trend()
+        if volume_analysis is None:
+            volume_analysis = self._analyze_volume()
+        if technical_analysis is None:
+            technical_analysis = self._analyze_technical_indicators()
+        if pattern_analysis is None:
+            pattern_analysis = self._analyze_patterns()
+
+        close = float(df['收盘'].iloc[-1])
+        ma5 = float(df['MA5'].iloc[-1])
+        ma10 = float(df['MA10'].iloc[-1])
+        ma20 = float(df['MA20'].iloc[-1])
+        rsi = float(df['RSI'].iloc[-1])
+        bullish_ma = ma5 > ma20 and close > ma20
+
+        buy_score = 0.0
+        sell_score = 0.0
+        buy_tags = []
+        sell_tags = []
+        categories = set()
+        sell_categories = set()
+
+        def _add_buy(points, tag, category):
+            nonlocal buy_score
+            buy_score += points
+            if tag and tag not in buy_tags:
+                buy_tags.append(tag)
+            if category:
+                categories.add(category)
+
+        def _add_sell(points, tag, category=None):
+            nonlocal sell_score
+            sell_score += points
+            if tag and tag not in sell_tags:
+                sell_tags.append(tag)
+            if category:
+                sell_categories.add(category)
+
+        # --- 趋势 / 均线 ---
+        if close > ma20 and ma5 > ma20:
+            _add_buy(1, '均线多头排列', 'trend')
+        if ma5 > ma10 > ma20:
+            _add_buy(1, '均线多头共振', 'trend')
+        if ma5 > ma20 and float(df['MA5'].iloc[-2]) <= float(df['MA20'].iloc[-2]):
+            _add_buy(1, 'MA金叉', 'trend')
+        if price_trend['trend'] == '上升':
+            _add_buy(1, '价格处于上升趋势', 'trend')
+        elif price_trend['trend'] == '下降':
+            _add_sell(2, '价格处于下降趋势', 'trend')
+
+        # --- 量能 ---
+        vol_sig = volume_analysis.get('volume_signal')
+        if vol_sig == '放量上涨':
+            _add_buy(1, '量能配合良好', 'volume')
+        elif vol_sig == '放量下跌':
+            _add_sell(1, '量能配合显示卖压', 'volume')
+
+        # --- 技术指标 ---
+        macd = technical_analysis['indicators']['MACD']
+        kdj = technical_analysis['indicators']['KDJ']
+        boll = technical_analysis['indicators']['BOLL']
+
+        if macd.get('message') == 'MACD金叉':
+            _add_buy(2, 'MACD金叉', 'technical')
+        elif macd.get('message') == 'MACD死叉':
+            _add_sell(2, 'MACD死叉', 'technical')
+        elif macd.get('signal') == 'buy' and '零轴上方' in macd.get('message', ''):
+            _add_buy(1, None, 'technical')
+
+        if kdj.get('message') == 'KDJ金叉':
+            _add_buy(1, 'KDJ金叉', 'technical')
+        elif kdj.get('message') == 'KDJ超买' and not bullish_ma:
+            _add_sell(2, 'KDJ超买', 'technical')
+
+        if rsi > 72 and not bullish_ma:
+            _add_sell(2, '超买区域', 'technical')
+        elif rsi < 30:
+            _add_buy(1, '超卖区域', 'technical')
+        elif 35 <= rsi <= 65:
+            _add_buy(1, 'RSI健康区间', 'technical')
+
+        if boll.get('message') == '价格突破布林带下轨':
+            _add_buy(1, '布林带下轨支撑', 'technical')
+        elif boll.get('message') == '价格突破布林带上轨':
+            _add_sell(1, '布林带上轨压力', 'technical')
+
+        tech_strength = technical_analysis.get('strength', 0)
+        if tech_strength >= 3:
+            _add_buy(1, '技术指标显示买入信号', 'technical')
+        elif tech_strength <= -2:
+            _add_sell(1, '技术指标显示卖出信号', 'technical')
+
+        # --- 形态 ---
+        if '双底形态' in pattern_analysis.get('price_patterns', []):
+            _add_buy(2, '双底形态', 'pattern')
+        if '双头形态' in pattern_analysis.get('price_patterns', []):
+            _add_sell(2, '双头形态', 'pattern')
+        if '长上影线' in pattern_analysis.get('candlestick', []):
+            _add_sell(1, '长上影线压力', 'pattern')
+
+        # 突破近期阻力（简化：收盘创20日新高且放量）
+        if len(df) >= 21:
+            high20 = float(df['最高'].iloc[-21:-1].max())
+            if close >= high20 * 0.998 and vol_sig == '放量上涨':
+                _add_buy(1, '突破阻力位', 'pattern')
+
+        # 追高风险：距 MA20 乖离过大则扣分
+        ma20_bias = (close - ma20) / ma20 if ma20 > 0 else 0.0
+        if ma20_bias > 0.15:
+            buy_score = max(0, buy_score - 1)
+
+        buy_int = int(buy_score)
+        sell_int = int(sell_score)
+        overbought = rsi > 72 and not bullish_ma
+        strong_buy_tags = {
+            'MA金叉', 'MACD金叉', '双底形态', '突破阻力位', '量能配合良好',
+            '价格处于上升趋势',
+        }
+        strong_sell_tags = {
+            '价格处于下降趋势', '放量下跌', '量能配合显示卖压', '双头形态', 'MACD死叉',
+        }
+        has_strong_buy = any(t in buy_tags for t in strong_buy_tags)
+        has_strong_sell = any(t in sell_tags for t in strong_sell_tags)
+        buy_ok = (
+            buy_int >= 3
+            and len(categories) >= 2
+            and sell_int <= 1
+            and not overbought
+            and ma20_bias <= 0.18
+            and (has_strong_buy or buy_int >= 4)
+        )
+        # 技术面满足，但需结合持仓盈亏（evaluate_sell_ok）才在回测中平仓
+        sell_signal_ready = (
+            sell_int >= 4
+            and len(sell_categories) >= 2
+            and (has_strong_sell or sell_int >= 5)
+        )
+
+        return {
+            'buy_score': buy_int,
+            'sell_score': sell_int,
+            'buy_tags': buy_tags,
+            'sell_tags': sell_tags,
+            'categories': categories,
+            'sell_categories': sell_categories,
+            'buy_ok': buy_ok,
+            'sell_signal_ready': sell_signal_ready,
+            'ma20_bias': ma20_bias,
+            'rsi': rsi,
+            'bullish_ma': bullish_ma,
+        }
+
+    @staticmethod
+    def evaluate_sell_ok(scores, price_return, holding_days, min_hold_days=7,
+                         min_profit=0.05, max_loss=-0.03):
+        """
+        强烈卖出执行条件：结构化看空 + 持仓天数 + 盈亏带过滤（避免微盈亏震荡洗出）。
+        """
+        if holding_days <= min_hold_days:
+            return False
+        if not scores.get('sell_signal_ready'):
+            return False
+        sell_int = scores.get('sell_score', 0)
+        strong_sell_tags = {
+            '价格处于下降趋势', '放量下跌', '量能配合显示卖压', '双头形态', 'MACD死叉',
+        }
+        has_strong_sell = any(t in scores.get('sell_tags', []) for t in strong_sell_tags)
+        if price_return >= min_profit:
+            return True
+        if price_return <= max_loss:
+            return has_strong_sell or sell_int >= 5
+        return False
+
     def get_trading_advice1(self):
         """生成更复杂的交易建议"""
-        signals = self.analyze_trading_signals()
-        latest_date = self.df.index[-1]
-        # import pdb;pdb.set_trace()
-
-        # 1. 价格趋势分析
         price_trend = self._analyze_price_trend()
-
-        # 2. 成交量分析
         volume_analysis = self._analyze_volume()
-        # import pdb;pdb.set_trace()
-
-        # 3. 技术指标综合分析
         technical_analysis = self._analyze_technical_indicators()
-
-        # 4. 形态识别
         pattern_analysis = self._analyze_patterns()
-
-        # # 5. 支撑阻力位突破分析
-        # breakthrough_analysis = self._analyze_support_resistance_breakthrough()
-        # if breakthrough_analysis['resistance_break']['status'] == '突破':
-        #     print(f"- 突破重要阻力位")
-        # if breakthrough_analysis['support_break']['status'] == '获得支撑':
-        #     print(f"- 在支撑位获得支撑")
-        # if breakthrough_analysis['support_break']['status'] == '跌破':
-        #     print("- 跌破重要支撑位" )
-        # analysis1 = self.analyze_weekly_moving_averages()
-        # 5. 生成综合建议
-        return self._generate_comprehensive_advice(
+        scores = self.compute_signal_scores(
             price_trend, volume_analysis, technical_analysis, pattern_analysis
+        )
+        return self._generate_comprehensive_advice(
+            price_trend, volume_analysis, technical_analysis, pattern_analysis, scores
         )
 
     def _analyze_price_trend(self):
@@ -886,32 +1052,35 @@ class StockAnalyzer:
 
         return patterns
 
-    def _generate_comprehensive_advice(self, price_trend, volume_analysis, technical_analysis, pattern_analysis):
+    def _generate_comprehensive_advice(
+        self, price_trend, volume_analysis, technical_analysis, pattern_analysis, scores=None
+    ):
         """生成综合建议"""
+        if scores is None:
+            scores = self.compute_signal_scores(
+                price_trend, volume_analysis, technical_analysis, pattern_analysis
+            )
         latest_date = self.df.index[-1]
         latest_price = self.df['收盘'].iloc[-1]
 
         advice = f"\n=== 交易建议分析 ({latest_date.strftime('%Y-%m-%d')}) ===\n"
         advice += f"当前价格: {latest_price:.2f}\n"
+        advice += f"买入评分: {scores['buy_score']} | 卖出评分: {scores['sell_score']}\n"
 
-        # 1. 趋势分析总结
         advice += "\n【趋势分析】\n"
         advice += f"主趋势: {price_trend['trend']} (强度: {price_trend['strength']})\n"
         for period, change in price_trend['changes'].items():
             advice += f"{period}: {change * 100:.2f}%\n"
 
-        # 2. 量能分析
         advice += "\n【量能分析】\n"
         advice += f"成交量状态: {volume_analysis['volume_trend']}\n"
         if volume_analysis['volume_signal']:
             advice += f"量能信号: {volume_analysis['volume_signal']}\n"
 
-        # 3. 技术指标分析
         advice += "\n【技术指标】\n"
         for indicator, signal in technical_analysis['indicators'].items():
             advice += f"{indicator}: {signal['message']}\n"
 
-        # 4. 形态分析
         if pattern_analysis['candlestick'] or pattern_analysis['price_patterns']:
             advice += "\n【形态分析】\n"
             if pattern_analysis['candlestick']:
@@ -919,38 +1088,37 @@ class StockAnalyzer:
             if pattern_analysis['price_patterns']:
                 advice += f"价格形态: {', '.join(pattern_analysis['price_patterns'])}\n"
 
-        # 5. 综合建议
-        total_strength = (
-                price_trend['strength'] +
-                technical_analysis['strength'] +
-                pattern_analysis['strength']
-        )
-        # print("total_strength:", total_strength)
-        # import pdb;pdb.set_trace()
         advice += "\n【交易建议】\n"
-        if total_strength >= 3:
+        if scores['buy_ok']:
             advice += "强烈买入信号\n"
             advice += "理由:\n"
-            if price_trend['trend'] == '上升':
-                advice += "- 价格处于上升趋势\n"
-            if volume_analysis['volume_signal'] == '放量上涨':
-                advice += "- 量能配合良好\n"
-            if technical_analysis['strength'] > 4:
-                advice += "- 技术指标显示买入信号\n"
-        elif total_strength <= -3:
+            for tag in scores['buy_tags']:
+                advice += f"- {tag}\n"
+        elif scores.get('sell_signal_ready'):
             advice += "强烈卖出信号\n"
             advice += "理由:\n"
-            if price_trend['trend'] == '下降':
-                advice += "- 价格处于下降趋势\n"
-            if volume_analysis['volume_signal'] == '放量下跌':
-                advice += "- 量能配合显示卖压\n"
-            if technical_analysis['strength'] < 0:
-                advice += "- 技术指标显示卖出信号\n"
+            for tag in scores['sell_tags']:
+                advice += f"- {tag}\n"
+            advice += "- 回测执行需：持仓>7天且盈利≥5%或亏损≥3%\n"
+        elif scores['sell_score'] >= 3:
+            advice += "卖出预警\n"
+            advice += "理由:\n"
+            for tag in scores['sell_tags']:
+                advice += f"- {tag}\n"
+        elif scores['buy_score'] >= 2 and scores['sell_score'] < scores['buy_score']:
+            advice += "买入信号\n"
+            advice += "理由:\n"
+            for tag in scores['buy_tags']:
+                advice += f"- {tag}\n"
+        elif scores['sell_score'] >= 2:
+            advice += "卖出信号\n"
+            advice += "理由:\n"
+            for tag in scores['sell_tags']:
+                advice += f"- {tag}\n"
         else:
             advice += "观望信号\n"
             advice += "- 当前无明显买卖信号，建议观望\n"
 
-        # 6. 风险提示
         advice += "\n【风险提示】\n"
         advice += "- 建议结合基本面分析\n"
         advice += "- 注意设置止损位置\n"

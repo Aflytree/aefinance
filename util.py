@@ -56,68 +56,48 @@ stock_code_name_dicts = {
             '603839': '安正时尚',
 }
 
-# 修改信号解析部分，增加更多技术指标考量
+# 修改信号解析部分，与 compute_signal_scores 输出的标签对齐
 def parse_trading_signals(advice):
-    '''
-    # 解析交易建议中的信号
     buy_signal = 0
     sell_signal = 0
 
-    # 根据建议内容判断买卖信号
-    if "强烈买入信号" in advice:
-        buy_signal += 2
-    elif "买入信号" in advice:
-        buy_signal += 1
-    elif "强烈卖出信号" in advice:
-        sell_signal += 2
-    elif "卖出信号" in advice:
-        sell_signal += 1
-
-    # 分析建议中的具体理由
-    if "价格处于上升趋势" in advice:
-        # pric_trend = 1
-        buy_signal += 1
-    if "价格处于下降趋势" in advice:
-        sell_signal += 1
-    if "量能配合良好" in advice:
-        buy_signal += 1
-        pric_trend = 1
-    if "量能配合显示卖压" in advice:
-        sell_signal += 1
-    if "技术指标显示买入信号" in advice:
-        buy_signal += 1
-    if "技术指标显示卖出信号" in advice:
-        sell_signal += 1
-    '''
-    buy_signal = 0
-    sell_signal = 0
-
-    # 基础信号
     signal_weights = {
-        "强烈买入信号": 2,
-        "买入信号": 1,
-        "强烈卖出信号": -2,
-        "卖出信号": -1,
+        "强烈买入信号": 3,
+        "买入信号": 2,
+        "强烈卖出信号": 3,
+        "卖出信号": 2,
+        "均线多头排列": 1,
+        "均线多头共振": 1,
+        "MA金叉": 1,
         "价格处于上升趋势": 1,
-        "价格处于下降趋势": -1,
+        "价格处于下降趋势": -2,
         "量能配合良好": 1,
         "量能配合显示卖压": -1,
+        "MACD金叉": 2,
+        "MACD死叉": -2,
+        "KDJ金叉": 1,
+        "KDJ超买": -2,
+        "RSI健康区间": 1,
+        "超卖区域": 1,
+        "超买区域": -2,
+        "布林带下轨支撑": 1,
+        "布林带上轨压力": -1,
         "技术指标显示买入信号": 1,
         "技术指标显示卖出信号": -1,
-        "超买区域": -0.5,  # 新增
-        "超卖区域": 0.5,  # 新增
-        "突破阻力位": 1,  # 新增
-        "跌破支撑位": -1  # 新增
+        "双底形态": 2,
+        "双头形态": -2,
+        "长上影线压力": -1,
+        "突破阻力位": 1,
+        "跌破支撑位": -1,
     }
 
     for pattern, weight in signal_weights.items():
-        if pattern in advice:
-            # import pdb;pdb.set_trace()
-
-            if weight > 0:
-                buy_signal += weight
-            else:
-                sell_signal += abs(weight)
+        if pattern not in advice:
+            continue
+        if weight > 0:
+            buy_signal += weight
+        else:
+            sell_signal += abs(weight)
 
     return buy_signal, sell_signal
 
@@ -802,7 +782,7 @@ def trade_daily(code, results, signal_day=None):
             if trade['date'].strftime('%Y-%m-%d') == day:
                 stock_name = get_stock_name(code)
                 today_trade += f" 买入 - 日期: {trade['date'].strftime('%Y-%m-%d')}, " \
-                               f" 价格: {trade['price']:.2f} \n" \
+                               f" 价格: {trade['price']:.2f} （信号日开仓，已计入当前持仓）\n" \
                                f" 总收益 : {results['total_return'] * 100: .2f}%" \
                                f" 夏普: {format(results['sharpe_ratio'], '.4f')}" \
                                f" reson: {results['trades'][-1]['reason']}\n" \
@@ -824,26 +804,26 @@ def trade_daily(code, results, signal_day=None):
 
 
 def last_busy(code, results, signal_day=None):
-    """当前持仓（买入日不是信号日的仍持仓）。"""
+    """当前持仓：最后一笔是买入即视为仍持仓（含信号日当天开仓）。"""
     trades = results['trades']
     current_hold_ = []
     if not trades:
         return current_hold_
     day = _signal_day_str(results, signal_day)
     if trades[-1]['type'] == 'buy':
-        # 信号日新买入归 trade_daily；这里只报“仍持仓、非信号日买入”
-        if trades[-1]['date'].strftime('%Y-%m-%d') != day:
-            stock_name = get_stock_name(code)
-            last_buy_ = (
-                f" 买入: {trades[-1]['date'].strftime('%Y-%m-%d')}, "
-                f" 价格: {trades[-1]['price']:.2f}\n"
-                f" 总收益 : {results['total_return'] * 100: .2f}%"
-                f" 夏普: {format(results['sharpe_ratio'], '.2f')}"
-                f" 胜率: {results['win_rate'] * 100:.2f}%\n"
-                f" code: {code}"
-                f" name: {stock_name}"
-            )
-            current_hold_.append(last_buy_)
+        stock_name = get_stock_name(code)
+        buy_date = trades[-1]['date'].strftime('%Y-%m-%d')
+        tag = "（今日开仓）" if buy_date == day else ""
+        last_buy_ = (
+            f" 买入: {buy_date}, "
+            f" 价格: {trades[-1]['price']:.2f}{tag}\n"
+            f" 总收益 : {results['total_return'] * 100: .2f}%"
+            f" 夏普: {format(results['sharpe_ratio'], '.2f')}"
+            f" 胜率: {results['win_rate'] * 100:.2f}%\n"
+            f" code: {code}"
+            f" name: {stock_name}"
+        )
+        current_hold_.append(last_buy_)
     return current_hold_
 
 
