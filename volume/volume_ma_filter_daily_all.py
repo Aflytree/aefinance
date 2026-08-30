@@ -1,3 +1,18 @@
+"""日终量能筛选（全市场主板）。
+
+常用命令（在仓库根目录 d:\\efi 下执行）：
+
+  # 今天往前 3 天为终点，倒推 7 个自然日；附带年线/半年线上方 + 无负面第三栏；跳过全池前瞻；发邮件
+  py -3.12 volume/volume_ma_filter_daily_all.py --week-before-days-ago 3 --above-ma120-or-ma250 --skip-forward-report --force
+
+说明：
+  --week-before-days-ago 3  → 区间 = (今天-3) 往前共 7 个自然日（含终点）
+  --above-ma120-or-ma250    → 命中 txt 追加第二栏（均线上方）、第三栏（均线上方且无负面）
+  --skip-forward-report     → 不跑全池近年前瞻报告2，明显更快
+  --force                   → 覆盖已有运行锁（有残留锁时用）
+  --no-send-email           → 只写本地报告不发邮件
+"""
+
 import argparse
 import os
 import time
@@ -39,6 +54,7 @@ from common import (
     normalize_stock_code,
     prepare_ohlcv_df,
 )
+from hit_risk_research import _is_clean, research_codes
 
 # 全池扫描：定期重连 Baostock，单股拉数失败时重试
 BAOSTOCK_RELOGIN_EVERY = 200
@@ -404,20 +420,24 @@ def build_week_hits_email_body(
         lines.append(f"{period_label}无命中记录。")
         return "\n".join(lines)
     for item in hits:
-        extra = _format_ma_extra(item)
-        try:
-            turn = item.get("换手率")
-            if turn is not None and float(turn) == float(turn):
-                extra = f" | 换手率:{float(turn):.2f}%" + extra
-        except (TypeError, ValueError):
-            pass
-        lines.append(
-            f"{item['股票代码']} {item['股票名称']} | 命中日期:{item['日期']} | "
-            f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
-            f"当天涨跌幅:{item['当天涨跌幅%']:.2f}% | 前20日涨跌幅:{item['信号日前20日涨跌幅%']:.2f}%"
-            f"{extra}"
-        )
+        lines.append(format_period_hit_line(item))
     return "\n".join(lines)
+
+
+def format_period_hit_line(item: Dict[str, Any]) -> str:
+    extra = _format_ma_extra(item)
+    try:
+        turn = item.get("换手率")
+        if turn is not None and float(turn) == float(turn):
+            extra = f" | 换手率:{float(turn):.2f}%" + extra
+    except (TypeError, ValueError):
+        pass
+    return (
+        f"{item['股票代码']} {item['股票名称']} | 命中日期:{item['日期']} | "
+        f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
+        f"当天涨跌幅:{item['当天涨跌幅%']:.2f}% | 前20日涨跌幅:{item['信号日前20日涨跌幅%']:.2f}%"
+        f"{extra}"
+    )
 
 
 def _ma_val(hit: Dict[str, Any], key: str) -> float:
@@ -499,20 +519,68 @@ def build_above_ma_report_body(
         lines.append("无符合均线条件的命中。")
         return "\n".join(lines)
     for item in hits:
-        extra = _format_ma_extra(item)
-        try:
-            turn = item.get("换手率")
-            if turn is not None and float(turn) == float(turn):
-                extra = f" | 换手率:{float(turn):.2f}%" + extra
-        except (TypeError, ValueError):
-            pass
-        lines.append(
-            f"{item['股票代码']} {item.get('股票名称', '')} | 命中日期:{item['日期']} | "
-            f"MA5/MA10:{item['MA5/MA10']:.3f} | 收盘/价格MA10:{item['收盘']:.2f}/{item['价格MA10']:.2f} | "
-            f"当天涨跌幅:{item['当天涨跌幅%']:.2f}% | 前20日涨跌幅:{item['信号日前20日涨跌幅%']:.2f}%"
-            f"{extra}"
-        )
+        lines.append(format_period_hit_line(item))
     return "\n".join(lines)
+
+
+def filter_hits_without_negative_news(
+    hits: List[Dict[str, Any]],
+    *,
+    lookback_days: int = 90,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """对命中股做近窗负面/减持关键词排查，保留无线索标的。"""
+    if not hits:
+        return [], {"before": 0, "after": 0, "lookback_days": lookback_days}
+    codes = [(str(h["股票代码"]).zfill(6), str(h.get("股票名称", "") or "")) for h in hits]
+    results = research_codes(codes, lookback_days=lookback_days)
+    clean_codes = {r["代码"] for r in results if _is_clean(r)}
+    kept = [h for h in hits if str(h["股票代码"]).zfill(6) in clean_codes]
+    stats = {
+        "before": len(hits),
+        "after": len(kept),
+        "drop_negative": len(hits) - len(kept),
+        "lookback_days": lookback_days,
+    }
+    return kept, stats
+
+
+def format_clean_filter_stats(stats: Dict[str, Any]) -> str:
+    return (
+        f"负面过滤(近{stats.get('lookback_days', 90)}日无减持/违规/负面关键词): "
+        f"{stats.get('before', 0)} -> {stats.get('after', 0)} "
+        f"(有线索-{stats.get('drop_negative', 0)})"
+    )
+
+
+def append_three_section_tails(
+    base_body: str,
+    *,
+    ma_hits: List[Dict[str, Any]],
+    ma_note: str,
+    clean_hits: List[Dict[str, Any]],
+    clean_note: str,
+) -> str:
+    """在命中正文后追加第二栏（均线上方）、第三栏（均线上方且无负面）。"""
+    parts = [base_body.rstrip(), "", "===== 二、年线/半年线上方 =====", ma_note, f"命中数量: {len(ma_hits)}", ""]
+    if ma_hits:
+        parts.extend(format_period_hit_line(h) for h in ma_hits)
+    else:
+        parts.append("无符合均线条件的命中。")
+    parts.extend(
+        [
+            "",
+            "===== 三、年线/半年线上方且无负面新闻 =====",
+            clean_note,
+            "说明: 基于东财公告/新闻与巨潮减持明细关键词匹配，仅供线索排查。",
+            f"命中数量: {len(clean_hits)}",
+            "",
+        ]
+    )
+    if clean_hits:
+        parts.extend(format_period_hit_line(h) for h in clean_hits)
+    else:
+        parts.append("无符合「均线上方且无负面」条件的命中。")
+    return "\n".join(parts) + "\n"
 
 
 def baostock_relogin(verbose: bool = False) -> bool:
@@ -847,7 +915,7 @@ def main() -> None:
     parser.add_argument(
         "--above-ma120-or-ma250",
         action="store_true",
-        help="额外输出/附带：命中日收盘价在半年线(MA120)或年线(MA250)上方的子集报告",
+        help="额外输出年线/半年线上方子集；并写入命中 txt 第二栏，第三栏为均线上方且无负面新闻",
     )
     parser.add_argument(
         "--no-send-email",
@@ -1071,14 +1139,24 @@ def _main_body(args: argparse.Namespace) -> None:
             post_filter_note=pnote,
         )
         preport = _root / f"volume_ma_filter_daily_all_{suffix}_{date_tag}.txt"
-        preport.write_text(pbody, encoding="utf-8")
-        print("\n" + pbody, flush=True)
-        print(f"\n报告（{label}命中）: {preport}", flush=True)
-        period_bodies.append((label, pbody, preport))
         if args.above_ma120_or_ma250:
             ma_hits, ma_stats = filter_hits_above_ma120_or_ma250(phits)
             ma_note = format_above_ma_filter_stats(ma_stats)
             print(f"{label}{ma_note}", flush=True)
+            print(
+                f"{label}开始负面信息排查（年线/半年线上方 {len(ma_hits)} 只）...",
+                flush=True,
+            )
+            clean_hits, clean_stats = filter_hits_without_negative_news(ma_hits)
+            clean_note = format_clean_filter_stats(clean_stats)
+            print(f"{label}{clean_note}", flush=True)
+            pbody = append_three_section_tails(
+                pbody,
+                ma_hits=ma_hits,
+                ma_note=ma_note,
+                clean_hits=clean_hits,
+                clean_note=clean_note,
+            )
             ma_body = build_above_ma_report_body(
                 ma_hits,
                 title=f"{label}量能命中 · 股价在年线或半年线上方（{p_start} ~ {p_end}）",
@@ -1092,12 +1170,32 @@ def _main_body(args: argparse.Namespace) -> None:
             ma_report.write_text(ma_body, encoding="utf-8")
             print("\n" + ma_body, flush=True)
             print(f"\n报告（{label}·年线/半年线上方）: {ma_report}", flush=True)
+        preport.write_text(pbody, encoding="utf-8")
+        print("\n" + pbody, flush=True)
+        print(f"\n报告（{label}命中）: {preport}", flush=True)
+        period_bodies.append((label, pbody, preport))
+        if args.above_ma120_or_ma250:
             period_bodies.append((f"{label}·年线/半年线上方", ma_body, ma_report))
 
     if args.above_ma120_or_ma250:
         ma_daily, ma_daily_stats = filter_hits_above_ma120_or_ma250(hits)
         ma_daily_note = format_above_ma_filter_stats(ma_daily_stats)
         print(f"当日{ma_daily_note}", flush=True)
+        print(
+            f"当日开始负面信息排查（年线/半年线上方 {len(ma_daily)} 只）...",
+            flush=True,
+        )
+        clean_daily, clean_daily_stats = filter_hits_without_negative_news(ma_daily)
+        clean_daily_note = format_clean_filter_stats(clean_daily_stats)
+        print(f"当日{clean_daily_note}", flush=True)
+        body = append_three_section_tails(
+            body,
+            ma_hits=ma_daily,
+            ma_note=ma_daily_note,
+            clean_hits=clean_daily,
+            clean_note=clean_daily_note,
+        )
+        report_daily.write_text(body, encoding="utf-8")
         ma_daily_body = build_above_ma_report_body(
             ma_daily,
             title=f"{signal_day} 日终量能命中 · 股价在年线或半年线上方",
