@@ -8,6 +8,7 @@ import pandas as pd
 
 _vol_dir = Path(__file__).resolve().parent
 _root = _vol_dir.parent
+_OUTPUT_DIR = _root / "output"
 for _p in (_vol_dir, _root):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -46,7 +47,9 @@ def main() -> None:
     parser.add_argument("--pre20-max-pct", type=float, default=DEFAULT_PRE20_MAX_PCT)
     parser.add_argument(
         "--export-csv",
-        default=f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt",
+        default=str(
+            _OUTPUT_DIR / f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt"
+        ),
     )
     args = parser.parse_args()
 
@@ -79,9 +82,12 @@ def main() -> None:
             print("\n" + "\n\n".join(summary_lines))
 
         if all_detail:
-            output_file = args.export_csv.strip() or f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt"
+            output_file = args.export_csv.strip() or str(
+                _OUTPUT_DIR / f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt"
+            )
             if not output_file.lower().endswith(".txt"):
                 output_file = f"{output_file}.txt"
+            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             path = export_forward_result(
                 pd.concat(all_detail, ignore_index=True),
                 pd.DataFrame(all_summary_rows),
@@ -89,7 +95,8 @@ def main() -> None:
             )
             print(f"\n格式化结果已导出: {path}")
 
-    detail_txt = f"volume_ma_filter_detail_{datetime.now().strftime('%Y%m%d')}.txt"
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    detail_txt = _OUTPUT_DIR / f"volume_ma_filter_detail_{datetime.now().strftime('%Y%m%d')}.txt"
     with open(detail_txt, "w", encoding="utf-8") as f:
         f.write(body)
     print(f"\n结果已导出: {detail_txt}")

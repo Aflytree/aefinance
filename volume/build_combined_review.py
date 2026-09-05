@@ -13,6 +13,7 @@ import akshare as ak
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
+OUTPUT = ROOT / "output"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -213,11 +214,11 @@ def annotate_above_section(src: Path, cache: Dict[str, Dict[str, Any]]) -> str:
 
 def build_for_tag(date_tag: str, *, today: date | None = None) -> Path:
     today = today or datetime.now().date()
-    daily = ROOT / f"volume_ma_filter_daily_all_{date_tag}.txt"
-    week = ROOT / f"volume_ma_filter_daily_all_weekbefore3d_{date_tag}.txt"
-    week_above = ROOT / f"volume_ma_filter_daily_all_weekbefore3d_above_ma120or250_{date_tag}.txt"
-    daily_above = ROOT / f"volume_ma_filter_daily_all_above_ma120or250_{date_tag}.txt"
-    out = ROOT / f"volume_ma_filter_combined_review_{date_tag}.txt"
+    daily = OUTPUT / f"volume_ma_filter_daily_all_{date_tag}.txt"
+    week = OUTPUT / f"volume_ma_filter_daily_all_weekbefore3d_{date_tag}.txt"
+    week_above = OUTPUT / f"volume_ma_filter_daily_all_weekbefore3d_above_ma120or250_{date_tag}.txt"
+    daily_above = OUTPUT / f"volume_ma_filter_daily_all_above_ma120or250_{date_tag}.txt"
+    out = OUTPUT / f"volume_ma_filter_combined_review_{date_tag}.txt"
 
     missing = [p.name for p in (daily, week, week_above, daily_above) if not p.is_file()]
     if missing:
@@ -262,6 +263,7 @@ def build_for_tag(date_tag: str, *, today: date | None = None) -> Path:
         "说明: 「年线/半年线上方」段落中，股票下一行附加负面指标与未来3个月减持判断"
         "（东财公告关键词启发式，非尽调）。",
     ]
+    OUTPUT.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
     print(f"wrote {out}", flush=True)
     return out

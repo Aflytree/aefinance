@@ -11,6 +11,8 @@
   --skip-forward-report     → 不跑全池近年前瞻报告2，明显更快
   --force                   → 覆盖已有运行锁（有残留锁时用）
   --no-send-email           → 只写本地报告不发邮件
+
+报告输出目录: output/
 """
 
 import argparse
@@ -28,6 +30,7 @@ from pathlib import Path
 
 _root = Path(__file__).resolve().parent.parent
 _vol_dir = Path(__file__).resolve().parent
+_OUTPUT_DIR = _root / "output"
 for _p in (_vol_dir, _root):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -636,11 +639,12 @@ def send_reports_email(
 ) -> None:
     """根据已生成的本地 txt 报告发送邮件（扫描跑完后可单独调用）。"""
     tag = date_tag or datetime.now().strftime("%Y%m%d")
-    report_daily = _root / f"volume_ma_filter_daily_all_{tag}.txt"
-    report_last_week = _root / f"volume_ma_filter_daily_all_lastweek_{tag}.txt"
-    report_3y = _root / f"volume_ma_filter_daily_all_3y_{tag}.txt"
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    report_daily = _OUTPUT_DIR / f"volume_ma_filter_daily_all_{tag}.txt"
+    report_last_week = _OUTPUT_DIR / f"volume_ma_filter_daily_all_lastweek_{tag}.txt"
+    report_3y = _OUTPUT_DIR / f"volume_ma_filter_daily_all_3y_{tag}.txt"
     signal_hits_reports = sorted(
-        _root.glob(f"volume_ma_filter_daily_all_signal_hits_*y_{tag}.txt")
+        _OUTPUT_DIR.glob(f"volume_ma_filter_daily_all_signal_hits_*y_{tag}.txt")
     )
     report_signal_hits_fwd = (
         signal_hits_reports[-1] if signal_hits_reports else None
@@ -1117,7 +1121,8 @@ def _main_body(args: argparse.Namespace) -> None:
         post_filter_note=post_note,
     )
 
-    report_daily = _root / f"volume_ma_filter_daily_all_{date_tag}.txt"
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    report_daily = _OUTPUT_DIR / f"volume_ma_filter_daily_all_{date_tag}.txt"
     report_daily.write_text(body, encoding="utf-8")
     print(body, flush=True)
     print(f"\n报告1（当日/最近交易日命中）: {report_daily}", flush=True)
@@ -1138,7 +1143,7 @@ def _main_body(args: argparse.Namespace) -> None:
             period_label=label,
             post_filter_note=pnote,
         )
-        preport = _root / f"volume_ma_filter_daily_all_{suffix}_{date_tag}.txt"
+        preport = _OUTPUT_DIR / f"volume_ma_filter_daily_all_{suffix}_{date_tag}.txt"
         if args.above_ma120_or_ma250:
             ma_hits, ma_stats = filter_hits_above_ma120_or_ma250(phits)
             ma_note = format_above_ma_filter_stats(ma_stats)
@@ -1164,7 +1169,7 @@ def _main_body(args: argparse.Namespace) -> None:
                 ma_filter_note=ma_note,
             )
             ma_report = (
-                _root
+                _OUTPUT_DIR
                 / f"volume_ma_filter_daily_all_{suffix}_above_ma120or250_{date_tag}.txt"
             )
             ma_report.write_text(ma_body, encoding="utf-8")
@@ -1203,7 +1208,7 @@ def _main_body(args: argparse.Namespace) -> None:
             ma_filter_note=ma_daily_note,
         )
         ma_daily_report = (
-            _root / f"volume_ma_filter_daily_all_above_ma120or250_{date_tag}.txt"
+            _OUTPUT_DIR / f"volume_ma_filter_daily_all_above_ma120or250_{date_tag}.txt"
         )
         ma_daily_report.write_text(ma_daily_body, encoding="utf-8")
         print("\n" + ma_daily_body, flush=True)
@@ -1212,7 +1217,7 @@ def _main_body(args: argparse.Namespace) -> None:
 
     history_years = int(args.history_years)
     report_signal_hits_fwd = (
-        _root / f"volume_ma_filter_daily_all_signal_hits_{history_years}y_{date_tag}.txt"
+        _OUTPUT_DIR / f"volume_ma_filter_daily_all_signal_hits_{history_years}y_{date_tag}.txt"
     )
     exported_signal_hits_fwd: Path | None = None
     signal_hits_fwd_summaries: List[str] = []
@@ -1237,7 +1242,7 @@ def _main_body(args: argparse.Namespace) -> None:
                 flush=True,
             )
 
-    report_forward = _root / f"volume_ma_filter_daily_all_{history_years}y_{date_tag}.txt"
+    report_forward = _OUTPUT_DIR / f"volume_ma_filter_daily_all_{history_years}y_{date_tag}.txt"
     exported_forward: Path | None = None
     if args.skip_forward_report:
         print("已跳过报告2（--skip-forward-report）", flush=True)

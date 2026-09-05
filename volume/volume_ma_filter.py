@@ -8,6 +8,7 @@ import pandas as pd
 
 _vol_dir = Path(__file__).resolve().parent
 _root = _vol_dir.parent
+_OUTPUT_DIR = _root / "output"
 for _p in (_vol_dir, _root):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -77,7 +78,9 @@ def main() -> None:
     parser.add_argument("--history-years", type=int, default=DEFAULT_HISTORY_YEARS)
     parser.add_argument(
         "--export-csv",
-        default=f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt",
+        default=str(
+            _OUTPUT_DIR / f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt"
+        ),
     )
     args = parser.parse_args()
 
@@ -111,9 +114,12 @@ def main() -> None:
             print("\n" + "\n\n".join(summary_lines))
 
         if all_detail:
-            output_file = args.export_csv.strip() or f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt"
+            output_file = args.export_csv.strip() or str(
+                _OUTPUT_DIR / f"volume_ma_forward_report_{datetime.now().strftime('%Y%m%d')}.txt"
+            )
             if not output_file.lower().endswith(".txt"):
                 output_file = f"{output_file}.txt"
+            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             strategy_txt = build_strategy_export_text(
                 args.threshold, args.pre20_max_pct, args.history_years, stock_codes
             )

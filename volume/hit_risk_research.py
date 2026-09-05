@@ -12,6 +12,7 @@ import akshare as ak
 import pandas as pd
 
 _ROOT = Path(__file__).resolve().parent.parent
+_OUTPUT_DIR = _ROOT / "output"
 
 NEG_TITLE_KEYS = (
     "减持",
@@ -326,7 +327,9 @@ def main() -> None:
         since=since,
         source_note=f"来源命中报告: {src.name}",
     )
-    out = Path(args.out) if args.out else _ROOT / f"hit_risk_research_{src.stem}.txt"
+    out = Path(args.out) if args.out else _OUTPUT_DIR / f"hit_risk_research_{src.stem}.txt"
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body, encoding="utf-8")
     print(body, flush=True)
     print(f"报告: {out}", flush=True)
