@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import akshare as ak
 import numpy as np
 from datetime import datetime, timedelta
+from collections import Counter
 import pandas as pd
 import efinance as ef
 from pylab import mpl
@@ -826,6 +827,148 @@ def last_busy(code, results, signal_day=None):
         current_hold_.append(last_buy_)
     return current_hold_
 
+
+def describe_data_freshness(all_results):
+    """汇总各票最新K线日期，生成邮件标注。
+
+    Returns:
+        signal_day, freshness_lines, using_today
+    """
+    today = datetime.now().date()
+    as_of_dates = []
+    stale_codes = []
+    today_codes = []
+    for r in all_results:
+        d = r.get("data_as_of")
+        if d is None:
+            continue
+        as_of_dates.append(d)
+        code = r.get("stock_code", "")
+        if d >= today:
+            today_codes.append(code)
+        else:
+            stale_codes.append(f"{code}({d})")
+
+    if not as_of_dates:
+        return today, [
+            "【数据新鲜度】未能判定最新K线日期，请人工核对",
+        ], False
+
+    signal_day = Counter(as_of_dates).most_common(1)[0][0]
+    using_today = signal_day >= today
+
+    lines = [
+        f"【数据新鲜度】日历今日: {today}",
+        f"【数据新鲜度】信号日(多数票最新K线): {signal_day}",
+    ]
+    if using_today:
+        lines.append("【数据新鲜度】使用的是【今日】股票数据")
+    else:
+        yesterday = today - timedelta(days=1)
+        if signal_day == yesterday:
+            lines.append(
+                f"【数据新鲜度】注意：使用的是【昨日 {signal_day}】股票数据"
+                f"（非今日 {today}，盘中/数据源尚未提供当日K线）"
+            )
+        else:
+            lines.append(
+                f"【数据新鲜度】注意：使用的是【非今日】股票数据，最新K线={signal_day}"
+                f"（日历今日={today}）"
+            )
+    if today_codes:
+        lines.append(f"【数据新鲜度】已含当日K线: {len(today_codes)} 只")
+    if stale_codes:
+        lines.append(
+            f"【数据新鲜度】缺少当日K线: {len(stale_codes)} 只 -> "
+            + ", ".join(stale_codes[:12])
+            + (" ..." if len(stale_codes) > 12 else "")
+        )
+    return signal_day, lines, using_today
+
+
+def format_double_bottom_mail_section(all_results, signal_day):
+    """邮件专段：未达严格双底的雏形观察 + 已确认但滞后/未买入提示。"""
+    watch_lines = []
+    lag_lines = []
+    confirmed_idle = []
+
+    for r in all_results:
+        note = r.get("double_bottom_note") or {}
+        if not note:
+            continue
+        code = r.get("stock_code", "")
+        name = r.get("stock_name", "")
+        label = f"{code} {name}".strip()
+
+        trades = r.get("trades") or []
+        bought_today = False
+        bought_with_db = False
+        for t in trades:
+            if t.get("type") != "buy":
+                continue
+            td = t.get("date")
+            if td is None:
+                continue
+            d = td.date() if hasattr(td, "date") else td
+            if d != signal_day:
+                continue
+            bought_today = True
+            if "双底" in str(t.get("reason", "")):
+                bought_with_db = True
+
+        b1, b2 = note.get("b1_date"), note.get("b2_date")
+        bottoms = ""
+        if b1 and b2:
+            bottoms = f"两底 {b1}/{b2}"
+            if note.get("b1_close") is not None and note.get("b2_close") is not None:
+                bottoms += f"({note['b1_close']:.2f}/{note['b2_close']:.2f})"
+
+        if note.get("ok_loose") and not note.get("ok_strict"):
+            fails = "、".join(note.get("fails") or []) or "严格条件未过"
+            watch_lines.append(
+                f" 【观察·未达标】{label}: {bottoms}；原因: {fails}"
+                f"（不计入买入加分，仅形态提示）"
+            )
+
+        first = note.get("first_strict_date")
+        pct_first = note.get("pct_from_first_strict")
+        pct_b2 = note.get("pct_from_b2")
+        pct_s = ""
+        if pct_first is not None:
+            pct_s = f"，自首次确认约{pct_first*100:+.1f}%"
+        elif pct_b2 is not None:
+            pct_s = f"，自二底约{pct_b2*100:+.1f}%"
+
+        if note.get("ok_strict") and first is not None and first < signal_day:
+            if bought_with_db or bought_today:
+                lag_lines.append(
+                    f" 【滞后提醒】{label}: 双底早在 {first} 已确认，"
+                    f"信号日 {signal_day} 才买入{pct_s}"
+                )
+            else:
+                confirmed_idle.append(
+                    f" 【已确认未买】{label}: 双底自 {first} 已成立{pct_s}"
+                    f"（其它买入条件未齐，仅提示）"
+                )
+        elif note.get("ok_strict") and first == signal_day and not bought_today:
+            confirmed_idle.append(
+                f" 【今日刚确认未买】{label}: {bottoms}；颈线={note.get('neckline')}"
+                f"（其它买入条件未齐，仅提示）"
+            )
+
+    lines = [
+        "",
+        "--------------------------------------",
+        " 双底形态提示（含未达买入标准的观察）",
+        "--------------------------------------",
+    ]
+    if not (watch_lines or lag_lines or confirmed_idle):
+        lines.append("(今日无双底观察/滞后提示)")
+        return lines
+    lines.extend(watch_lines)
+    lines.extend(lag_lines)
+    lines.extend(confirmed_idle)
+    return lines
 
 
 def draw_stock_code_price(all_results):
