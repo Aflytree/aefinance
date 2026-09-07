@@ -74,11 +74,97 @@ def _describe_data_freshness(all_results):
     return signal_day, lines, using_today
 
 
+def _format_double_bottom_mail_section(all_results, signal_day):
+    """邮件专段：未达严格双底的雏形观察 + 已确认但滞后/未买入提示。"""
+    watch_lines = []
+    lag_lines = []
+    confirmed_idle = []
+
+    for r in all_results:
+        note = r.get("double_bottom_note") or {}
+        if not note:
+            continue
+        code = r.get("stock_code", "")
+        name = r.get("stock_name", "")
+        label = f"{code} {name}".strip()
+
+        trades = r.get("trades") or []
+        bought_today = False
+        bought_with_db = False
+        for t in trades:
+            if t.get("type") != "buy":
+                continue
+            td = t.get("date")
+            if td is None:
+                continue
+            d = td.date() if hasattr(td, "date") else td
+            if d != signal_day:
+                continue
+            bought_today = True
+            if "双底" in str(t.get("reason", "")):
+                bought_with_db = True
+
+        b1, b2 = note.get("b1_date"), note.get("b2_date")
+        bottoms = ""
+        if b1 and b2:
+            bottoms = f"两底 {b1}/{b2}"
+            if note.get("b1_close") is not None and note.get("b2_close") is not None:
+                bottoms += f"({note['b1_close']:.2f}/{note['b2_close']:.2f})"
+
+        # 雏形成立但未达买入加分标准 → 仍邮件标注
+        if note.get("ok_loose") and not note.get("ok_strict"):
+            fails = "、".join(note.get("fails") or []) or "严格条件未过"
+            watch_lines.append(
+                f" 【观察·未达标】{label}: {bottoms}；原因: {fails}"
+                f"（不计入买入加分，仅形态提示）"
+            )
+
+        first = note.get("first_strict_date")
+        pct_first = note.get("pct_from_first_strict")
+        pct_b2 = note.get("pct_from_b2")
+        pct_s = ""
+        if pct_first is not None:
+            pct_s = f"，自首次确认约{pct_first*100:+.1f}%"
+        elif pct_b2 is not None:
+            pct_s = f"，自二底约{pct_b2*100:+.1f}%"
+
+        if note.get("ok_strict") and first is not None and first < signal_day:
+            if bought_with_db or bought_today:
+                lag_lines.append(
+                    f" 【滞后提醒】{label}: 双底早在 {first} 已确认，"
+                    f"信号日 {signal_day} 才买入{pct_s}"
+                )
+            else:
+                confirmed_idle.append(
+                    f" 【已确认未买】{label}: 双底自 {first} 已成立{pct_s}"
+                    f"（其它买入条件未齐，仅提示）"
+                )
+        elif note.get("ok_strict") and first == signal_day and not bought_today:
+            confirmed_idle.append(
+                f" 【今日刚确认未买】{label}: {bottoms}；颈线={note.get('neckline')}"
+                f"（其它买入条件未齐，仅提示）"
+            )
+
+    lines = [
+        "",
+        "--------------------------------------",
+        " 双底形态提示（含未达买入标准的观察）",
+        "--------------------------------------",
+    ]
+    if not (watch_lines or lag_lines or confirmed_idle):
+        lines.append("(今日无双底观察/滞后提示)")
+        return lines
+    lines.extend(watch_lines)
+    lines.extend(lag_lines)
+    lines.extend(confirmed_idle)
+    return lines
+
+
 def efi_backtesting():
     efi_email.send("Start Stock Backtesting")
     # 记录开始时间
     start_time = time.time()
-    for i  in range(50):
+    for i  in range(1):
         stock_codes = []
         #常规关注股票
         stock_codes =list(set(stock_codes + [ '002119', '002448',
@@ -133,6 +219,10 @@ def efi_backtesting():
         last_buys_list = [
             item for sublist in last_buys if sublist for item in sublist
         ]
+        pattern_lines = _format_double_bottom_mail_section(all_results, signal_day)
+        for line in pattern_lines:
+            logging.info("%s", line)
+
         mail_lines = [
             f"回测运行日: {time.strftime('%Y-%m-%d %H:%M:%S')}",
             f"股票数: {len(stock_codes)}, 有效回测: {len(all_results)}",
@@ -159,6 +249,7 @@ def efi_backtesting():
             mail_lines.extend(last_buys_list)
         else:
             mail_lines.append("(无当前持仓)")
+        mail_lines.extend(pattern_lines)
         logging.info(
             "信号日买卖 %s 条, 当前持仓 %s 条",
             len(one_d_list),
@@ -176,7 +267,7 @@ def efi_backtesting():
         #                                                  num_of_trades=6
         #                                                  )
         # util.get_and_print_execution_time(start_time)
-        time.sleep(400)
+        # time.sleep(400)
         # # # # # # # # # # 可视化结果
         # util.visualize_backtest_results(all_results)
         # # # 打印统计摘要

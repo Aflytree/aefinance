@@ -369,33 +369,217 @@ class StockAnalyzer:
 
         return signal
 
-    def _is_double_bottom(self, prices):
-        """识别双底形态"""
-        if len(prices) < 20:
-            return False
+    @staticmethod
+    def _bar_date(frame, i):
+        """从切片取第 i 根K线日期。"""
+        if '日期' in frame.columns:
+            return pd.Timestamp(frame.iloc[i]['日期']).date()
+        return pd.Timestamp(frame.index[i]).date()
 
-        # 寻找局部最低点
+    def _probe_double_bottom(self, recent):
+        """双底探测：宽松雏形 + 严格确认 + 未达标原因（供买入加分与邮件标注）。
+
+        recent: 近端日线（Series 仅收盘，或含 收盘/最高/成交量[/日期] 的 DataFrame）。
+        """
+        out = {
+            'ok_loose': False,
+            'ok_strict': False,
+            'fails': [],
+            'b1_date': None,
+            'b1_close': None,
+            'b2_date': None,
+            'b2_close': None,
+            'neckline': None,
+            'latest_close': None,
+            'vol_ratio': None,
+            'rebound_pct': None,
+        }
+        if recent is None or len(recent) < 20:
+            out['fails'].append('窗口不足20日')
+            return out
+
+        if isinstance(recent, pd.Series):
+            frame = pd.DataFrame({'收盘': recent.reset_index(drop=True)})
+            prices = frame['收盘']
+            highs = prices
+            vols = None
+        else:
+            frame = recent.copy()
+            if '收盘' not in frame.columns:
+                out['fails'].append('无收盘列')
+                return out
+            if '日期' not in frame.columns and not isinstance(frame.index, pd.RangeIndex):
+                frame = frame.reset_index()
+                if '日期' not in frame.columns:
+                    frame = frame.rename(columns={frame.columns[0]: '日期'})
+            frame = frame.reset_index(drop=True)
+            prices = frame['收盘']
+            highs = frame['最高'] if '最高' in frame.columns else prices
+            vols = frame['成交量'] if '成交量' in frame.columns else None
+
+        out['latest_close'] = float(prices.iloc[-1])
+
         bottoms = []
         for i in range(1, len(prices) - 1):
             if prices.iloc[i] < prices.iloc[i - 1] and prices.iloc[i] < prices.iloc[i + 1]:
-                bottoms.append((i, prices.iloc[i]))
-
+                bottoms.append(i)
         if len(bottoms) < 2:
-            return False
-        # import pdb;pdb.set_trace()
-        # 检查最后两个底部
-        last_two_bottoms = bottoms[-2:]
-        if len(last_two_bottoms) == 2:
-            first_bottom, second_bottom = last_two_bottoms
-            # 检查两个底部的价格接近程度
-            price_diff = abs(first_bottom[1] - second_bottom[1]) / first_bottom[1]
-            # 检查两个底部的时间间隔
-            time_diff = second_bottom[0] - first_bottom[0]
+            out['fails'].append('局部底不足2个')
+            return out
 
-            if price_diff < 0.05 and 5 <= time_diff <= 15:
-                return True
+        i1, i2 = bottoms[-2], bottoms[-1]
+        p1, p2 = float(prices.iloc[i1]), float(prices.iloc[i2])
+        out['b1_close'], out['b2_close'] = p1, p2
+        try:
+            out['b1_date'] = self._bar_date(frame, i1)
+            out['b2_date'] = self._bar_date(frame, i2)
+        except Exception:
+            out['b1_date'] = out['b2_date'] = None
 
-        return False
+        if p1 <= 0:
+            out['fails'].append('底1价格无效')
+            return out
+        price_diff = abs(p1 - p2) / p1
+        time_diff = i2 - i1
+        if price_diff >= 0.05:
+            out['fails'].append(f'两底价差{price_diff*100:.1f}%>=5%')
+            return out
+        if not (5 <= time_diff <= 15):
+            out['fails'].append(f'两底间隔{time_diff}日不在5~15')
+            return out
+
+        out['ok_loose'] = True  # 价格雏形成立
+
+        mid_slice = highs.iloc[i1 + 1:i2]
+        if mid_slice.empty:
+            out['fails'].append('无中间反弹')
+            return out
+        neckline = float(mid_slice.max())
+        out['neckline'] = neckline
+        if neckline <= max(p1, p2):
+            out['fails'].append('中间高点未高于两底(无颈线)')
+            return out
+
+        after_closes = prices.iloc[i2 + 1:]
+        if after_closes.empty:
+            out['fails'].append('二底后无K线(无法确认)')
+            return out
+
+        rebound_high = float(after_closes.max())
+        rebound_pct = (rebound_high - p2) / p2
+        depth = (neckline - p2) / p2
+        need_rebound = max(0.03, depth * 0.5)
+        out['rebound_pct'] = rebound_pct
+        if rebound_pct < need_rebound:
+            out['fails'].append(
+                f'反弹{rebound_pct*100:.1f}%不足(需>={need_rebound*100:.1f}%)'
+            )
+
+        if vols is not None:
+            v1, v2 = float(vols.iloc[i1]), float(vols.iloc[i2])
+            if v1 > 0:
+                out['vol_ratio'] = v2 / v1
+                if v2 > v1 * 1.15:
+                    out['fails'].append(f'二底放量v2/v1={v2/v1:.2f}>1.15')
+
+        broke = bool((after_closes >= neckline * 0.998).any())
+        if not broke:
+            out['fails'].append(f'未收盘突破颈线{neckline:.2f}')
+
+        latest = float(prices.iloc[-1])
+        if latest < neckline * 0.995:
+            out['fails'].append(f'最新{latest:.2f}未站稳颈线{neckline:.2f}')
+
+        out['ok_strict'] = len(out['fails']) == 0
+        return out
+
+    def _is_double_bottom(self, recent):
+        """识别双底形态（含颈线突破、二底量能/反弹、向上确认）。"""
+        return bool(self._probe_double_bottom(recent).get('ok_strict'))
+
+    def _prepare_recent_ohlcv(self, n=20):
+        """取近 n 日 OHLCV，并保证有「日期」列。"""
+        if self.df is None or len(self.df) < n:
+            return None
+        recent = self.df.tail(n).copy()
+        if '日期' not in recent.columns:
+            recent = recent.reset_index()
+            if recent.columns[0] != '日期' and '日期' not in recent.columns:
+                recent = recent.rename(columns={recent.columns[0]: '日期'})
+        return recent.reset_index(drop=True)
+
+    def _first_strict_double_bottom_date(self, lookback_ends=30):
+        """近 lookback_ends 根内，严格双底首次为真的交易日。"""
+        if self.df is None or len(self.df) < 20:
+            return None
+        n = len(self.df)
+        start = max(20, n - lookback_ends)
+        for end in range(start, n + 1):
+            chunk = self.df.iloc[end - 20:end].copy()
+            if '日期' not in chunk.columns:
+                chunk = chunk.reset_index()
+                if '日期' not in chunk.columns:
+                    chunk = chunk.rename(columns={chunk.columns[0]: '日期'})
+            if self._probe_double_bottom(chunk.reset_index(drop=True)).get('ok_strict'):
+                return pd.Timestamp(self.df.index[end - 1]).date()
+        return None
+
+    def double_bottom_mail_snapshot(self):
+        """邮件用双底快照：雏形未达标 / 严格确认日 / 相对涨幅。"""
+        recent = self._prepare_recent_ohlcv(20)
+        if recent is None:
+            return None
+        probe = self._probe_double_bottom(recent)
+        first_strict = None
+        first_close = None
+        # 优先：当前两底对应颈线的首次收盘突破日（比滚动窗口更贴合本形态）
+        if probe.get('b2_date') is not None and probe.get('neckline') is not None:
+            neck = float(probe['neckline'])
+            b2d = probe['b2_date']
+            for idx, row in self.df.iterrows():
+                d = pd.Timestamp(idx).date()
+                if d <= b2d:
+                    continue
+                if float(row['收盘']) >= neck * 0.998:
+                    first_strict = d
+                    first_close = float(row['收盘'])
+                    break
+        # 严格成立时若上面未找到，回退滚动窗口
+        if first_strict is None and (probe.get('ok_strict') or probe.get('ok_loose')):
+            first_strict = self._first_strict_double_bottom_date(30)
+            if first_strict is not None:
+                try:
+                    hit = self.df.loc[
+                        [i for i in self.df.index if pd.Timestamp(i).date() == first_strict]
+                    ]
+                    first_close = float(hit['收盘'].iloc[0]) if len(hit) else None
+                except Exception:
+                    first_close = None
+        latest_date = pd.Timestamp(self.df.index.max()).date()
+        pct_from_first = None
+        if first_close and probe.get('latest_close'):
+            pct_from_first = probe['latest_close'] / first_close - 1.0
+        pct_from_b2 = None
+        if probe.get('b2_close') and probe.get('latest_close') and probe['b2_close'] > 0:
+            pct_from_b2 = probe['latest_close'] / probe['b2_close'] - 1.0
+        return {
+            'ok_loose': probe.get('ok_loose', False),
+            'ok_strict': probe.get('ok_strict', False),
+            'fails': list(probe.get('fails') or []),
+            'b1_date': probe.get('b1_date'),
+            'b1_close': probe.get('b1_close'),
+            'b2_date': probe.get('b2_date'),
+            'b2_close': probe.get('b2_close'),
+            'neckline': probe.get('neckline'),
+            'first_strict_date': first_strict,
+            'first_strict_close': first_close,
+            'latest_date': latest_date,
+            'latest_close': probe.get('latest_close'),
+            'pct_from_first_strict': pct_from_first,
+            'pct_from_b2': pct_from_b2,
+            'vol_ratio': probe.get('vol_ratio'),
+            'rebound_pct': probe.get('rebound_pct'),
+        }
 
     def _is_double_top(self, prices):
         """识别双头形态"""
@@ -1038,10 +1222,11 @@ class StockAnalyzer:
                 patterns['candlestick'].append('长下影线')
 
         # 2. 识别多日形态
-        recent_prices = df['收盘'].tail(20)
+        recent = df.tail(20)
+        recent_prices = recent['收盘']
 
-        # 判断双底形态
-        if self._is_double_bottom(recent_prices):
+        # 判断双底形态（颈线突破 + 二底量能/反弹 + 向上确认）
+        if self._is_double_bottom(recent):
             patterns['price_patterns'].append('双底形态')
             patterns['strength'] += 2
 

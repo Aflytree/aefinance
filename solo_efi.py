@@ -238,33 +238,69 @@ class StockAnalyzer:
 
         return signal
 
-    def _is_double_bottom(self, prices):
-        """识别双底形态"""
-        if len(prices) < 20:
+    def _is_double_bottom(self, recent):
+        """识别双底形态（含颈线突破、二底量能/反弹、向上确认）。"""
+        if recent is None or len(recent) < 20:
             return False
 
-        # 寻找局部最低点
+        if isinstance(recent, pd.Series):
+            prices = recent.reset_index(drop=True)
+            highs = prices
+            vols = None
+        else:
+            df = recent.reset_index(drop=True)
+            if '收盘' not in df.columns:
+                return False
+            prices = df['收盘']
+            highs = df['最高'] if '最高' in df.columns else prices
+            vols = df['成交量'] if '成交量' in df.columns else None
+
         bottoms = []
         for i in range(1, len(prices) - 1):
             if prices.iloc[i] < prices.iloc[i - 1] and prices.iloc[i] < prices.iloc[i + 1]:
-                bottoms.append((i, prices.iloc[i]))
-
+                bottoms.append(i)
         if len(bottoms) < 2:
             return False
 
-        # 检查最后两个底部
-        last_two_bottoms = bottoms[-2:]
-        if len(last_two_bottoms) == 2:
-            first_bottom, second_bottom = last_two_bottoms
-            # 检查两个底部的价格接近程度
-            price_diff = abs(first_bottom[1] - second_bottom[1]) / first_bottom[1]
-            # 检查两个底部的时间间隔
-            time_diff = second_bottom[0] - first_bottom[0]
+        i1, i2 = bottoms[-2], bottoms[-1]
+        p1, p2 = float(prices.iloc[i1]), float(prices.iloc[i2])
+        if p1 <= 0:
+            return False
+        price_diff = abs(p1 - p2) / p1
+        time_diff = i2 - i1
+        if not (price_diff < 0.05 and 5 <= time_diff <= 15):
+            return False
 
-            if price_diff < 0.05 and 5 <= time_diff <= 15:
-                return True
+        mid_slice = highs.iloc[i1 + 1:i2]
+        if mid_slice.empty:
+            return False
+        neckline = float(mid_slice.max())
+        if neckline <= max(p1, p2):
+            return False
 
-        return False
+        after_closes = prices.iloc[i2 + 1:]
+        if after_closes.empty:
+            return False
+
+        rebound_high = float(after_closes.max())
+        rebound_pct = (rebound_high - p2) / p2
+        depth = (neckline - p2) / p2
+        if rebound_pct < max(0.03, depth * 0.5):
+            return False
+
+        if vols is not None:
+            v1, v2 = float(vols.iloc[i1]), float(vols.iloc[i2])
+            if v1 > 0 and v2 > v1 * 1.15:
+                return False
+
+        if not (after_closes >= neckline * 0.998).any():
+            return False
+
+        latest = float(prices.iloc[-1])
+        if latest < neckline * 0.995:
+            return False
+
+        return True
 
     def _is_double_top(self, prices):
         """识别双头形态"""
@@ -489,10 +525,11 @@ class StockAnalyzer:
             patterns['candlestick'].append('长下影线')
 
         # 2. 识别多日形态
-        recent_prices = df['收盘'].tail(20)
+        recent = df.tail(20)
+        recent_prices = recent['收盘']
 
-        # 判断双底形态
-        if self._is_double_bottom(recent_prices):
+        # 判断双底形态（颈线突破 + 二底量能/反弹 + 向上确认）
+        if self._is_double_bottom(recent):
             patterns['price_patterns'].append('双底形态')
             patterns['strength'] += 2
 

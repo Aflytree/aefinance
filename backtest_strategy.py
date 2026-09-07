@@ -374,6 +374,11 @@ def backtest_strategy(stock_code,
 
         data_as_of = df.index.max().date() if len(df) else None
         today = __import__('datetime').datetime.now().date()
+        double_bottom_note = None
+        try:
+            double_bottom_note = analyzer.double_bottom_mail_snapshot()
+        except Exception as e:
+            logging.debug("双底邮件快照失败 %s: %s", stock_code, e)
         return {
             'stock_code': stock_code,
             'stock_name' : util.get_stock_name(stock_code),
@@ -390,6 +395,7 @@ def backtest_strategy(stock_code,
             'total_fees': total_fees,
             'data_as_of': data_as_of,
             'data_is_today': bool(data_as_of and data_as_of >= today),
+            'double_bottom_note': double_bottom_note,
         }
 
     except Exception as e:
